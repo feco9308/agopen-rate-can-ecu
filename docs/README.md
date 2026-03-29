@@ -33,3 +33,9 @@ A hagyományos PWM vezérlés helyett:
 
 - sebesség (RPM)
 - pozíció (szinkronizáció)
+- 
+## Megjegyzés
+
+Ez a rendszer az AgOpenGPS rate control funkciójára épül.
+
+A vetési ráta számítás nem része ennek a projektnek.
