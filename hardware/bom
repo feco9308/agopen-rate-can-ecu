@@ -1,0 +1,64 @@
+# Alkatrész lista (BOM)
+
+## Áttekintés
+
+Ez a lista a vetőgép CAN-alapú ECU rendszer kezdeti hardver elemeit tartalmazza.
+
+❗ A lista folyamatosan változik a fejlesztés során.
+
+---
+
+## 1. Központi ECU (Teensy)
+
+| Komponens | Típus | Megjegyzés |
+|----------|------|-----------|
+| MCU | Teensy 4.1 | központi vezérlő |
+| Ethernet | beépített / W5500 | LAN kommunikáció |
+| CAN transceiver | SN65HVD230 / MCP2562 | CAN bus |
+
+---
+
+## 2. Motor node (STM32G)
+
+| Komponens | Típus | Megjegyzés |
+|----------|------|-----------|
+| MCU | STM32G4xx | motorvezérlés |
+| Motor driver | DRV83xx | BLDC driver |https://www.aliexpress.com/item/1005006448391882.html?spm=a2g0o.productlist.main.2.6c299Yo79Yo7zK&algo_pvid=9bc51a78-bcac-403a-a677-28be5398af74&algo_exp_id=9bc51a78-bcac-403a-a677-28be5398af74-1&pdp_ext_f=%7B%22order%22%3A%2244%22%2C%22eval%22%3A%221%22%2C%22fromPage%22%3A%22search%22%7D&pdp_npi=6%40dis%21HUF%2121588.78%2116189.86%21%21%2162.42%2146.81%21%4021039a5b17748029622873352e56bb%2112000037206915000%21sea%21HU%211837572195%21X%211%210%21n_tag%3A-29919%3Bd%3Af2e38446%3Bm03_new_user%3A-29895&curPageLogUid=l9Ovp5IGUXZa&utparam-url=scene%3Asearch%7Cquery_from%3A%7Cx_object_id%3A1005006448391882%7C_p_origin_prod%3A|
+| CAN transceiver | MCP2562 | CAN kommunikáció |
+| Encoder | mágneses / hall | pozíció mérés |
+
+---
+
+## 3. Tápellátás
+
+| Komponens | Típus | Megjegyzés |
+|----------|------|-----------|
+| DC-DC | 12V → 5V | ECU táp |
+| DC-DC | 12V → 3.3V | MCU táp |
+| biztosíték | - | védelem |
+
+---
+
+## 4. Szenzorok
+
+| Komponens | Típus | Megjegyzés |
+|----------|------|-----------|
+| Encoder | AS5600 / AMT | pozíció |
+| áram mérés | shunt + opamp | motor áram |
+
+---
+
+## 5. Kommunikáció
+
+| Komponens | Típus | Megjegyzés |
+|----------|------|-----------|
+| CAN bus | twisted pair | hálózat |
+| lezárás | 120 ohm | bus termination |
+
+---
+
+## 6. Megjegyzések
+
+- Az alkatrészek típusa változhat
+- több alternatíva is lehetséges
+- a lista nem végleges
