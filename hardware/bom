@@ -10,55 +10,54 @@ Ez a lista a vetőgép CAN-alapú ECU rendszer kezdeti hardver elemeit tartalmaz
 
 ## 1. Központi ECU (Teensy)
 
-| Komponens | Típus | Megjegyzés |
-|----------|------|-----------|
-| MCU | Teensy 4.1 | központi vezérlő |
-| Ethernet | beépített / W5500 | LAN kommunikáció |
-| CAN transceiver | SN65HVD230 / MCP2562 | CAN bus |
+| Komponens       | Típus                | Megjegyzés       |
+| --------------- | -------------------- | ---------------- |
+| MCU             | Teensy 4.1           | központi vezérlő |
+| Ethernet        | beépített / W5500    | LAN kommunikáció |
+| CAN transceiver | SN65HVD230 / MCP2562 | CAN bus          |
 
 ---
 
 ## 2. Motor node (STM32G)
 
-| Komponens | Típus | Megjegyzés |
-|----------|------|-----------|
-| MCU | STM32G4xx | motorvezérlés |https://www.aliexpress.com/item/1005006552207317.html?spm=a2g0o.productlist.main.1.d19dc918PMzs6n&algo_pvid=aedd6076-dc96-437b-b610-4911180f707a&algo_exp_id=aedd6076-dc96-437b-b610-4911180f707a-0&pdp_ext_f=%7B%22order%22%3A%223157%22%2C%22spu_best_type%22%3A%22price%22%2C%22eval%22%3A%221%22%2C%22fromPage%22%3A%22search%22%7D&pdp_npi=6%40dis%21HUF%212233.92%212233.92%21%21%2144.68%2144.68%21%402103985c17747982032604042e2ac2%2112000037648032018%21sea%21HU%211837572195%21X%211%210%21n_tag%3A-29919%3Bd%3Af2e38446%3Bm03_new_user%3A-29895&curPageLogUid=YRivPjBtmido&utparam-url=scene%3Asearch%7Cquery_from%3A%7Cx_object_id%3A1005006552207317%7C_p_origin_prod%3A|
-| Motor driver | DRV83xx | BLDC driver |https://www.aliexpress.com/item/1005006448391882.html?spm=a2g0o.productlist.main.2.6c299Yo79Yo7zK&algo_pvid=9bc51a78-bcac-403a-a677-28be5398af74&algo_exp_id=9bc51a78-bcac-403a-a677-28be5398af74-1&pdp_ext_f=%7B%22order%22%3A%2244%22%2C%22eval%22%3A%221%22%2C%22fromPage%22%3A%22search%22%7D&pdp_npi=6%40dis%21HUF%2121588.78%2116189.86%21%21%2162.42%2146.81%21%4021039a5b17748029622873352e56bb%2112000037206915000%21sea%21HU%211837572195%21X%211%210%21n_tag%3A-29919%3Bd%3Af2e38446%3Bm03_new_user%3A-29895&curPageLogUid=l9Ovp5IGUXZa&utparam-url=scene%3Asearch%7Cquery_from%3A%7Cx_object_id%3A1005006448391882%7C_p_origin_prod%3A|
-| CAN transceiver | MCP2562 | CAN kommunikáció |https://www.aliexpress.com/item/1005005569468051.html?spm=a2g0o.productlist.main.1.e390F9NoF9NoAt&algo_pvid=2883195f-c2f8-4b2a-bdb3-526007fe4a86&algo_exp_id=2883195f-c2f8-4b2a-bdb3-526007fe4a86-0&pdp_ext_f=%7B%22order%22%3A%22830%22%2C%22eval%22%3A%221%22%2C%22fromPage%22%3A%22search%22%7D&pdp_npi=6%40dis%21HUF%21684.81%21684.81%21%21%211.98%211.98%21%40211b613917748042310661146e3300%2112000033590451869%21sea%21HU%211837572195%21X%211%210%21n_tag%3A-29919%3Bd%3Af2e38446%3Bm03_new_user%3A-29895&curPageLogUid=8u0gcW4EbhBD&utparam-url=scene%3Asearch%7Cquery_from%3A%7Cx_object_id%3A1005005569468051%7C_p_origin_prod%3A|
-
+| Komponens       | Típus     | Megjegyzés                                                                     |
+| --------------- | --------- | ------------------------------------------------------------------------------ |
+| MCU             | STM32G4xx | motorvezérlés [Link](https://www.aliexpress.com/item/1005006552207317.html)    |
+| Motor driver    | DRV83xx   | BLDC driver [Link](https://www.aliexpress.com/item/1005006448391882.html)      |
+| CAN transceiver | MCP2562   | CAN kommunikáció [Link](https://www.aliexpress.com/item/1005005569468051.html) |
 
 ---
 
 ## 3. Tápellátás
 
-| Komponens | Típus | Megjegyzés |
-|----------|------|-----------|
-| DC-DC | 12V → 5V | ECU táp |
-| DC-DC | 12V → 3.3V | MCU táp |
-| biztosíték | - | védelem |
+| Komponens  | Típus      | Megjegyzés |
+| ---------- | ---------- | ---------- |
+| DC-DC      | 12V → 5V   | ECU táp    |
+| DC-DC      | 12V → 3.3V | MCU táp    |
+| biztosíték | -          | védelem    |
 
 ---
 
 ## 4. Szenzorok
 
-| Komponens | Típus | Megjegyzés |
-|----------|------|-----------|
-| Encoder | AS5600 / AMT | pozíció | https://www.aliexpress.com/item/1005009516781005.html?spm=a2g0o.detail.pcDetailTopMoreOtherSeller.4.28b6UPS0UPS06U&gps-id=pcDetailTopMoreOtherSeller&scm=1007.40050.354490.0&scm_id=1007.40050.354490.0&scm-url=1007.40050.354490.0&pvid=f8d0b812-0484-415a-a354-8632f31a66e4&_t=gps-id:pcDetailTopMoreOtherSeller,scm-url:1007.40050.354490.0,pvid:f8d0b812-0484-415a-a354-8632f31a66e4,tpp_buckets:668%232846%238114%231999&pdp_ext_f=%7B%22order%22%3A%22499%22%2C%22spu_best_type%22%3A%22price%22%2C%22eval%22%3A%221%22%2C%22sceneId%22%3A%2230050%22%2C%22fromPage%22%3A%22recommend%22%7D&pdp_npi=6%40dis%21HUF%213061.40%213061.40%21%21%2161.23%2161.23%21%40210390c217748045956676165e3468%2112000049341601419%21rec%21HU%211837572195%21X%211%210%21n_tag%3A-29919%3Bd%3Af2e38446%3Bm03_new_user%3A-29895&utparam-url=scene%3ApcDetailTopMoreOtherSeller%7Cquery_from%3A%7Cx_object_id%3A1005009516781005%7C_p_origin_prod%3A|
-| áram mérés | shunt + opamp | motor áram |https://www.aliexpress.com/item/32885099898.html?dp=Cj0KCQjwm6POBhCrARIsAIG58CJRM4yqtZ2j8KUXJX66zy0QOSkkbQxOdKATQBDdPQ6pgywQXH0KSnUaAh_HEALw_wcB&af=1264135&cv=47843&mall_affr=pr3&utm_source=admitad&utm_medium=cpa&utm_campaign=1264135&utm_content=47843&gad_source=1&gad_campaignid=23315346362&gbraid=0AAAAAo8tlaR8OMmeE8U-L9ws4CSi14mCr&gclid=Cj0KCQjwm6POBhCrARIsAIG58CJRM4yqtZ2j8KUXJX66zy0QOSkkbQxOdKATQBDdPQ6pgywQXH0KSnUaAh_HEALw_wcB|
+| Komponens  | Típus         | Megjegyzés                                                            |
+| ---------- | ------------- | --------------------------------------------------------------------- |
+| Encoder    | AS5600 / AMT  | pozíció [Link](https://www.aliexpress.com/item/1005009516781005.html) |
+| áram mérés | shunt + opamp | motor áram [Link](https://www.aliexpress.com/item/32885099898.html)   |
 
 ---
 
 ## 5. Kommunikáció
 
-| Komponens | Típus | Megjegyzés |
-|----------|------|-----------|
-| CAN bus | twisted pair | hálózat |
-| lezárás | 120 ohm | bus termination |
+| Komponens | Típus        | Megjegyzés      |
+| --------- | ------------ | --------------- |
+| CAN bus   | twisted pair | hálózat         |
+| lezárás   | 120 ohm      | bus termination |
 
 ---
 
 ## 6. Megjegyzések
 
-- Az alkatrészek típusa változhat
-- több alternatíva is lehetséges
-- a lista nem végleges
+* Az alkatrészek típusa változhat
+* több alternatíva is lehetséges
+* a lista nem végleges
