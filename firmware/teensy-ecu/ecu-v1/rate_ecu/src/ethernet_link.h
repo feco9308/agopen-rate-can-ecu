@@ -25,6 +25,10 @@ private:
     IPAddress destination_ip_{192, 168, 1, 255};
     uint32_t last_rc_rx_ms_ = 0;
     uint32_t last_status_tx_ms_ = 0;
+
     uint8_t module_id_ = 1;
     uint8_t sensor_count_ = 1;
+
+    uint16_t ino_id_ = 0x0001;
+    bool good_pins_ = true;
 };

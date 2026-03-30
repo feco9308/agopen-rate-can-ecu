@@ -5,6 +5,10 @@
 
 FlexCAN_T4<CAN2, RX_SIZE_256, TX_SIZE_16> Can0;
 
+// 0 = nincs CAN TX debug
+// 1 = CAN TX debug bekapcsolva
+static constexpr bool CAN_TX_DEBUG = false;
+
 bool CanBus::begin() {
     Serial.print("CAN init start, baud=");
     Serial.println(cfg::CAN_BAUDRATE);
@@ -34,12 +38,12 @@ void CanBus::handleFrame(const CAN_message_t& msg, NodeManager& nodeManager) {
         const uint8_t nodeId = static_cast<uint8_t>(id - cfg::CAN_ID_NODE_STATUS_BASE);
 
         NodeStatusFastFrame frame{};
-        frame.status_flags      = msg.buf[0];
-        frame.error_code        = msg.buf[1];
-        frame.actual_rpm_x10    = static_cast<int16_t>(msg.buf[2] | (msg.buf[3] << 8));
-        frame.actual_pos_u16    = static_cast<uint16_t>(msg.buf[4] | (msg.buf[5] << 8));
-        frame.alive_counter     = msg.buf[6];
-        frame.sync_error_x256rev= static_cast<int8_t>(msg.buf[7]);
+        frame.status_flags       = msg.buf[0];
+        frame.error_code         = msg.buf[1];
+        frame.actual_rpm_x10     = static_cast<int16_t>(msg.buf[2] | (msg.buf[3] << 8));
+        frame.actual_pos_u16     = static_cast<uint16_t>(msg.buf[4] | (msg.buf[5] << 8));
+        frame.alive_counter      = msg.buf[6];
+        frame.sync_error_x256rev = static_cast<int8_t>(msg.buf[7]);
 
         nodeManager.onStatusFrame(nodeId, frame);
 
@@ -80,20 +84,22 @@ void CanBus::sendGlobalControl(const EcuState& ecu, const SyncAxis& syncAxis) {
 
     int ok = Can0.write(msg);
 
-    Serial.print("[CAN TX] ID=0x");
-    Serial.print(msg.id, HEX);
-    Serial.print(" ok=");
-    Serial.print(ok);
-    Serial.print(" mode=");
-    Serial.print(frame.system_mode);
-    Serial.print(" flags=");
-    Serial.print(frame.control_flags);
-    Serial.print(" rpm_x10=");
-    Serial.print(frame.base_rpm_x10);
-    Serial.print(" sync=");
-    Serial.print(frame.sync_pos_u16);
-    Serial.print(" seq=");
-    Serial.println(frame.sequence);
+    if (CAN_TX_DEBUG) {
+        Serial.print("[CAN TX] ID=0x");
+        Serial.print(msg.id, HEX);
+        Serial.print(" ok=");
+        Serial.print(ok);
+        Serial.print(" mode=");
+        Serial.print(frame.system_mode);
+        Serial.print(" flags=");
+        Serial.print(frame.control_flags);
+        Serial.print(" rpm_x10=");
+        Serial.print(frame.base_rpm_x10);
+        Serial.print(" sync=");
+        Serial.print(frame.sync_pos_u16);
+        Serial.print(" seq=");
+        Serial.println(frame.sequence);
+    }
 }
 
 void CanBus::sendEstop(uint8_t reason) {
