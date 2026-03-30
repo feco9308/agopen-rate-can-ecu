@@ -5,11 +5,13 @@
 #include "sync_axis.h"
 #include "can_bus.h"
 #include "node_manager.h"
+#include "ethernet_link.h"
 
 EcuState ecu;
 SyncAxis syncAxis;
 CanBus canBus;
 NodeManager nodeManager;
+EthernetLink ethernetLink;
 
 uint32_t lastLoop = 0;
 uint32_t lastPrint = 0;
@@ -29,10 +31,7 @@ void setup() {
         Serial.println("CAN begin failed");
     }
 
-    ecu.setMode(SystemMode::MANUAL);
-    ecu.setDrive(true);
-    ecu.setSync(true);
-    ecu.setBaseRpm(100.0f);
+    ethernetLink.begin();
 
     lastLoop = millis();
 }
@@ -41,6 +40,8 @@ void loop() {
     const uint32_t now = millis();
     const uint32_t dt = now - lastLoop;
     lastLoop = now;
+
+    ethernetLink.update(ecu);
 
     ecu.update();
     syncAxis.update(ecu.baseRpm(), dt);
@@ -52,6 +53,8 @@ void loop() {
         canBus.sendGlobalControl(ecu, syncAxis);
     }
 
+    ethernetLink.sendStatus(ecu, nodeManager.node(1));
+
     if (now - lastPrint > 1000) {
         lastPrint = now;
 
@@ -59,6 +62,8 @@ void loop() {
         Serial.print(static_cast<uint8_t>(ecu.mode()));
         Serial.print(" rpm=");
         Serial.print(ecu.baseRpm(), 1);
+        Serial.print(" upm=");
+        Serial.print(ecu.rateSourceUpm(), 3);
         Serial.print(" pos_u16=");
         Serial.print(syncAxis.posU16());
         Serial.print(" flags=");

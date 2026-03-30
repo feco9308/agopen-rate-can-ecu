@@ -5,45 +5,35 @@ void EcuState::begin() {
     base_rpm_ = 0.0f;
     drive_ = false;
     sync_ = false;
+    rate_source_upm_ = 0.0f;
+    meter_cal_ = 0.0f;
+    manual_adjust_ = 0;
+    relay_lo_ = 0;
+    relay_hi_ = 0;
+    kp_ = 0.0f;
+    ki_ = 0.0f;
+    kd_ = 0.0f;
+    min_pwm_ = 0;
+    max_pwm_ = 255;
 }
 
-void EcuState::update() {
-    // később ide jön fault és állapotgép logika
-}
+void EcuState::update() {}
 
-void EcuState::setMode(SystemMode mode) {
-    mode_ = mode;
-}
-
-SystemMode EcuState::mode() const {
-    return mode_;
-}
+void EcuState::setMode(SystemMode mode) { mode_ = mode; }
+SystemMode EcuState::mode() const { return mode_; }
 
 void EcuState::setBaseRpm(float rpm) {
     if (rpm < cfg::RPM_MIN) rpm = cfg::RPM_MIN;
     if (rpm > cfg::RPM_MAX) rpm = cfg::RPM_MAX;
     base_rpm_ = rpm;
 }
+float EcuState::baseRpm() const { return base_rpm_; }
 
-float EcuState::baseRpm() const {
-    return base_rpm_;
-}
+void EcuState::setDrive(bool en) { drive_ = en; }
+bool EcuState::drive() const { return drive_; }
 
-void EcuState::setDrive(bool en) {
-    drive_ = en;
-}
-
-bool EcuState::drive() const {
-    return drive_;
-}
-
-void EcuState::setSync(bool en) {
-    sync_ = en;
-}
-
-bool EcuState::sync() const {
-    return sync_;
-}
+void EcuState::setSync(bool en) { sync_ = en; }
+bool EcuState::sync() const { return sync_; }
 
 uint8_t EcuState::flags() const {
     uint8_t f = 0;
@@ -51,3 +41,43 @@ uint8_t EcuState::flags() const {
     if (sync_)  f |= CTRL_SYNC_ENABLE;
     return f;
 }
+
+void EcuState::setRateSourceUpm(float v) { rate_source_upm_ = v; }
+float EcuState::rateSourceUpm() const { return rate_source_upm_; }
+
+void EcuState::setMeterCal(float v) { meter_cal_ = v; }
+float EcuState::meterCal() const { return meter_cal_; }
+
+void EcuState::setManualAdjust(int16_t v) { manual_adjust_ = v; }
+int16_t EcuState::manualAdjust() const { return manual_adjust_; }
+
+void EcuState::setRelayState(uint8_t lo, uint8_t hi) {
+    relay_lo_ = lo;
+    relay_hi_ = hi;
+}
+uint8_t EcuState::relayLo() const { return relay_lo_; }
+uint8_t EcuState::relayHi() const { return relay_hi_; }
+
+void EcuState::setPid(float kp, float ki, float kd, uint8_t min_pwm, uint8_t max_pwm) {
+    kp_ = kp;
+    ki_ = ki;
+    kd_ = kd;
+    min_pwm_ = min_pwm;
+    max_pwm_ = max_pwm;
+}
+
+float EcuState::kp() const { return kp_; }
+float EcuState::ki() const { return ki_; }
+float EcuState::kd() const { return kd_; }
+uint8_t EcuState::minPwm() const { return min_pwm_; }
+uint8_t EcuState::maxPwm() const { return max_pwm_; }
+
+void EcuState::setAgioSubnet(uint8_t ip0, uint8_t ip1, uint8_t ip2) {
+    agio_ip0_ = ip0;
+    agio_ip1_ = ip1;
+    agio_ip2_ = ip2;
+}
+
+uint8_t EcuState::agioIp0() const { return agio_ip0_; }
+uint8_t EcuState::agioIp1() const { return agio_ip1_; }
+uint8_t EcuState::agioIp2() const { return agio_ip2_; }
