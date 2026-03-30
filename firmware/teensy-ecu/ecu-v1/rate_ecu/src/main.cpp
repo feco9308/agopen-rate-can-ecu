@@ -3,12 +3,15 @@
 #include "config.h"
 #include "ecu_state.h"
 #include "sync_axis.h"
+#include "can_bus.h"
 
 EcuState ecu;
 SyncAxis syncAxis;
+CanBus canBus;
 
 uint32_t lastLoop = 0;
 uint32_t lastPrint = 0;
+uint32_t lastGlobalControl = 0;
 
 void setup() {
     Serial.begin(115200);
@@ -18,6 +21,10 @@ void setup() {
 
     ecu.begin();
     syncAxis.begin();
+
+    if (!canBus.begin()) {
+        Serial.println("CAN begin failed");
+    }
 
     // ideiglenes tesztállapot
     ecu.setMode(SystemMode::MANUAL);
@@ -35,8 +42,14 @@ void loop() {
 
     ecu.update();
     syncAxis.update(ecu.baseRpm(), dt);
+    canBus.update();
 
-    if (now - lastPrint > 500) {
+    if (now - lastGlobalControl >= (1000 / cfg::GLOBAL_CONTROL_HZ)) {
+        lastGlobalControl = now;
+        canBus.sendGlobalControl(ecu, syncAxis);
+    }
+
+    if (now - lastPrint > 1000) {
         lastPrint = now;
 
         Serial.print("mode=");
