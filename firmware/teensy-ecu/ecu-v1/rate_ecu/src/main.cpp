@@ -4,10 +4,12 @@
 #include "ecu_state.h"
 #include "sync_axis.h"
 #include "can_bus.h"
+#include "node_manager.h"
 
 EcuState ecu;
 SyncAxis syncAxis;
 CanBus canBus;
+NodeManager nodeManager;
 
 uint32_t lastLoop = 0;
 uint32_t lastPrint = 0;
@@ -21,6 +23,7 @@ void setup() {
 
     ecu.begin();
     syncAxis.begin();
+    nodeManager.begin();
 
     if (!canBus.begin()) {
         Serial.println("CAN begin failed");
@@ -41,7 +44,8 @@ void loop() {
 
     ecu.update();
     syncAxis.update(ecu.baseRpm(), dt);
-    canBus.update();
+    canBus.update(nodeManager);
+    nodeManager.update();
 
     if (now - lastGlobalControl >= (1000 / cfg::GLOBAL_CONTROL_HZ)) {
         lastGlobalControl = now;
@@ -57,10 +61,18 @@ void loop() {
         Serial.print(ecu.baseRpm(), 1);
         Serial.print(" pos_u16=");
         Serial.print(syncAxis.posU16());
-        Serial.print(" pos_rev=");
-        Serial.print(syncAxis.posRev(), 4);
         Serial.print(" flags=");
         Serial.println(ecu.flags());
+
+        const auto& n1 = nodeManager.node(1);
+        Serial.print("node1 online=");
+        Serial.print(n1.online);
+        Serial.print(" rpm=");
+        Serial.print(n1.actual_rpm, 1);
+        Serial.print(" pos=");
+        Serial.print(n1.actual_pos);
+        Serial.print(" err=");
+        Serial.println(n1.error_code);
     }
 
     delay(5);

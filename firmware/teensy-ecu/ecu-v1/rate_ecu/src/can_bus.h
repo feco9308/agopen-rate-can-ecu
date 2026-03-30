@@ -6,14 +6,18 @@
 
 class EcuState;
 class SyncAxis;
+class NodeManager;
 
 class CanBus {
 public:
     bool begin();
-    void update();
+    void update(NodeManager& nodeManager);
 
     void sendGlobalControl(const EcuState& ecu, const SyncAxis& syncAxis);
     void sendEstop(uint8_t reason);
+
+private:
+    void handleFrame(const CAN_message_t& msg, NodeManager& nodeManager);
 
 private:
     uint8_t sequence_ = 0;
