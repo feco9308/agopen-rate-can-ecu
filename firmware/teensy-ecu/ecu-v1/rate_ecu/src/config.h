@@ -15,7 +15,7 @@ static constexpr float RPM_MAX = 250.0f;
 static constexpr float POSITION_KP = 0.5f;
 
 // CAN
-static constexpr uint32_t CAN_BAUDRATE = 500000;
+static constexpr uint32_t CAN_BAUDRATE = 250000;
 
 // CAN IDs
 static constexpr uint16_t CAN_ID_GLOBAL_CONTROL = 0x080;

@@ -26,7 +26,6 @@ void setup() {
         Serial.println("CAN begin failed");
     }
 
-    // ideiglenes tesztállapot
     ecu.setMode(SystemMode::MANUAL);
     ecu.setDrive(true);
     ecu.setSync(true);
@@ -54,16 +53,12 @@ void loop() {
 
         Serial.print("mode=");
         Serial.print(static_cast<uint8_t>(ecu.mode()));
-
         Serial.print(" rpm=");
         Serial.print(ecu.baseRpm(), 1);
-
         Serial.print(" pos_u16=");
         Serial.print(syncAxis.posU16());
-
         Serial.print(" pos_rev=");
         Serial.print(syncAxis.posRev(), 4);
-
         Serial.print(" flags=");
         Serial.println(ecu.flags());
     }
