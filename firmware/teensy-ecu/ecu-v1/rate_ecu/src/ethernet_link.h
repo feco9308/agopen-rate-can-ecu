@@ -4,19 +4,33 @@
 #include <NativeEthernet.h>
 #include <NativeEthernetUdp.h>
 
+#include "can_bus.h"
 #include "ecu_state.h"
 #include "node_manager.h"
 
 class EthernetLink {
 public:
     bool begin();
-    void update(EcuState* ecus, uint8_t ecuCount);
+    void update(EcuState* ecus, NodeManager* nodeManagers, CanBus& canBus, uint8_t ecuCount);
     void sendStatus(const EcuState* ecus, const NodeManager* nodeManagers, uint8_t sensorCount);
 
 private:
-    bool processUdpPacket(EcuState* ecus, uint8_t ecuCount, const uint8_t* data, size_t len);
+    bool processUdpPacket(EcuState* ecus,
+                          NodeManager* nodeManagers,
+                          CanBus& canBus,
+                          uint8_t ecuCount,
+                          const uint8_t* data,
+                          size_t len,
+                          bool& refreshRcTimeout);
     void processAgioPacket(const uint8_t* data, size_t len, EcuState* ecus, uint8_t ecuCount);
     void applyTimeout(EcuState* ecus, uint8_t ecuCount);
+    void applyRuntimeConfigToEcus(EcuState* ecus);
+    void sendCustomPacket(uint16_t pgn, const uint8_t payload[8]);
+    void sendConfigStatus(uint8_t block_id, uint8_t index, const EcuState* ecus, uint8_t ecuCount);
+    void sendDiagStatus(const EcuState* ecus, uint8_t ecuCount);
+    void sendDiagSensor(uint8_t sensorIndex, const EcuState& ecu);
+    void sendDiagNodeSummary(uint8_t sensorIndex, const EcuState& ecu, const NodeManager& nodeManager);
+    void sendCustomDiagStream(const EcuState* ecus, const NodeManager* nodeManagers, uint8_t sensorCount);
 
 private:
     EthernetUDP udp_;
@@ -25,9 +39,12 @@ private:
     IPAddress destination_ip_{192, 168, 1, 255};
     uint32_t last_rc_rx_ms_ = 0;
     uint32_t last_status_tx_ms_ = 0;
+    uint32_t last_custom_diag_tx_ms_ = 0;
 
     uint8_t module_id_ = 0;
-    uint8_t sensor_count_ = cfg::ACTIVE_SENSOR_CHANNELS;
+    uint8_t sensor_count_ = cfg::DEFAULT_ACTIVE_SENSOR_CHANNELS;
+    uint8_t diag_sensor_mask_ = 0x07;
+    uint16_t diag_node_mask_ = 0xFFFF;
 
     uint16_t ino_id_ = 0x0001;
     bool good_pins_ = true;

@@ -1,5 +1,6 @@
 #include "ecu_state.h"
 #include "rate_math.h"
+#include "runtime_config.h"
 
 void EcuState::begin() {
     mode_ = SystemMode::OFF;
@@ -13,6 +14,8 @@ void EcuState::begin() {
     relay_hi_ = 0;
     section_mask_ = static_cast<uint16_t>(cfg::sectionMaskLimit());
     holes_per_rev_ = cfg::DEFAULT_HOLES_PER_REV;
+    gear_ratio_ = cfg::DEFAULT_GEAR_RATIO;
+    upm_scale_ = cfg::DEFAULT_UPM_SCALE;
     kp_ = 0.0f;
     ki_ = 0.0f;
     kd_ = 0.0f;
@@ -67,9 +70,10 @@ void EcuState::setSectionMask(uint16_t mask) {
 uint16_t EcuState::sectionMask() const { return section_mask_; }
 
 bool EcuState::sectionEnabled(uint8_t nodeId) const {
+    const uint8_t configured_rows = runtime_cfg::configuredRowCount();
     if (nodeId == 0 ||
         nodeId > cfg::NODE_COUNT_MAX ||
-        nodeId > cfg::ACTIVE_SECTION_COUNT ||
+        nodeId > configured_rows ||
         nodeId > cfg::PGN_SECTION_BIT_COUNT) {
         return false;
     }
@@ -79,8 +83,9 @@ bool EcuState::sectionEnabled(uint8_t nodeId) const {
 }
 
 uint8_t EcuState::activeSectionCount() const {
-    const uint8_t tracked_sections = (cfg::ACTIVE_SECTION_COUNT < cfg::PGN_SECTION_BIT_COUNT)
-        ? cfg::ACTIVE_SECTION_COUNT
+    const uint8_t configured_rows = runtime_cfg::configuredRowCount();
+    const uint8_t tracked_sections = (configured_rows < cfg::PGN_SECTION_BIT_COUNT)
+        ? configured_rows
         : cfg::PGN_SECTION_BIT_COUNT;
 
     return rate_math::countActiveSections(section_mask_, tracked_sections);
@@ -90,6 +95,16 @@ void EcuState::setHolesPerRev(uint16_t holes) {
     holes_per_rev_ = (holes == 0) ? cfg::DEFAULT_HOLES_PER_REV : holes;
 }
 uint16_t EcuState::holesPerRev() const { return holes_per_rev_; }
+
+void EcuState::setGearRatio(float ratio) {
+    gear_ratio_ = (ratio <= 0.0f) ? cfg::DEFAULT_GEAR_RATIO : ratio;
+}
+float EcuState::gearRatio() const { return gear_ratio_; }
+
+void EcuState::setUpmScale(float scale) {
+    upm_scale_ = (scale <= 0.0f) ? cfg::DEFAULT_UPM_SCALE : scale;
+}
+float EcuState::upmScale() const { return upm_scale_; }
 
 void EcuState::setPid(float kp, float ki, float kd, uint8_t min_pwm, uint8_t max_pwm) {
     kp_ = kp;

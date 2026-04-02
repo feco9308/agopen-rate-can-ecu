@@ -10,18 +10,21 @@ static constexpr uint32_t NODE_COMMAND_HZ = 20;
 
 // limits
 static constexpr float RPM_MIN = 0.0f;
-static constexpr float RPM_MAX = 250.0f;
+static constexpr float RPM_MAX = 1000.0f;
 
 // geometry / machine defaults
 static constexpr uint8_t MAX_SENSOR_CHANNELS = 3;           // compiled-in capacity
-static constexpr uint8_t ACTIVE_SENSOR_CHANNELS = 3;        // set how many sensor channels are active
+static constexpr uint8_t DEFAULT_ACTIVE_SENSOR_CHANNELS = 3;
 static constexpr uint8_t PGN_SECTION_BIT_COUNT = 16;          // relay_lo + relay_hi
 static constexpr uint8_t NODE_COUNT_MAX = 16;                // current CAN node range uses 0x101..0x110
-static constexpr uint8_t ACTIVE_SECTION_COUNT = 6;          // installed/used rows on the machine
+static constexpr uint8_t DEFAULT_CONFIGURED_ROW_COUNT = 6;   // rows/sections configured in the machine
 static constexpr uint16_t DEFAULT_HOLES_PER_REV = 26;
+static constexpr float DEFAULT_GEAR_RATIO = 2.0f;          // motor rpm / disc rpm
+static constexpr float DEFAULT_UPM_SCALE = 100.0f;         // ECU-side scaling for AOG target_upm
 
 // sync
 static constexpr float POSITION_KP = 0.5f;
+static constexpr float TRIM_RPM_LIMIT = 200.0f;
 
 // CAN
 static constexpr uint32_t CAN_BAUDRATE = 250000;
