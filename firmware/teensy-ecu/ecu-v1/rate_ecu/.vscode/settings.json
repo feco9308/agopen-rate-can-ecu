@@ -1,3 +1,4 @@
 {
-    "idf.currentSetup": "C:\\Users\\User2\\esp\\v5.4.1\\esp-idf"
+    "idf.currentSetup": "C:\\Users\\User2\\esp\\v5.4.1\\esp-idf",
+    "chatgpt.openOnStartup": true
 }

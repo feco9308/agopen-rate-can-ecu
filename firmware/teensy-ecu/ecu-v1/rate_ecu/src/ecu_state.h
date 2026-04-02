@@ -33,6 +33,14 @@ public:
     uint8_t relayLo() const;
     uint8_t relayHi() const;
 
+    void setSectionMask(uint16_t mask);
+    uint16_t sectionMask() const;
+    bool sectionEnabled(uint8_t nodeId) const;
+    uint8_t activeSectionCount() const;
+
+    void setHolesPerRev(uint16_t holes);
+    uint16_t holesPerRev() const;
+
     void setPid(float kp, float ki, float kd, uint8_t min_pwm, uint8_t max_pwm);
     float kp() const;
     float ki() const;
@@ -57,6 +65,8 @@ private:
 
     uint8_t relay_lo_ = 0;
     uint8_t relay_hi_ = 0;
+    uint16_t section_mask_ = static_cast<uint16_t>(cfg::sectionMaskLimit());
+    uint16_t holes_per_rev_ = cfg::DEFAULT_HOLES_PER_REV;
 
     float kp_ = 0.0f;
     float ki_ = 0.0f;

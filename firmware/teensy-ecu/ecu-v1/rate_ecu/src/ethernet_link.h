@@ -10,13 +10,13 @@
 class EthernetLink {
 public:
     bool begin();
-    void update(EcuState& ecu);
-    void sendStatus(const EcuState& ecu, const NodeRuntimeState& node1);
+    void update(EcuState* ecus, uint8_t ecuCount);
+    void sendStatus(const EcuState* ecus, const NodeManager* nodeManagers, uint8_t sensorCount);
 
 private:
-    bool processUdpPacket(EcuState& ecu, const uint8_t* data, size_t len);
-    void processAgioPacket(const uint8_t* data, size_t len, EcuState& ecu);
-    void applyTimeout(EcuState& ecu);
+    bool processUdpPacket(EcuState* ecus, uint8_t ecuCount, const uint8_t* data, size_t len);
+    void processAgioPacket(const uint8_t* data, size_t len, EcuState* ecus, uint8_t ecuCount);
+    void applyTimeout(EcuState* ecus, uint8_t ecuCount);
 
 private:
     EthernetUDP udp_;
@@ -26,8 +26,8 @@ private:
     uint32_t last_rc_rx_ms_ = 0;
     uint32_t last_status_tx_ms_ = 0;
 
-    uint8_t module_id_ = 1;
-    uint8_t sensor_count_ = 1;
+    uint8_t module_id_ = 0;
+    uint8_t sensor_count_ = cfg::ACTIVE_SENSOR_CHANNELS;
 
     uint16_t ino_id_ = 0x0001;
     bool good_pins_ = true;
