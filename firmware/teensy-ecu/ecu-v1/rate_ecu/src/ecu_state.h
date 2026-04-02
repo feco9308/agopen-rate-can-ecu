@@ -40,6 +40,10 @@ public:
 
     void setHolesPerRev(uint16_t holes);
     uint16_t holesPerRev() const;
+    void setGearRatio(float ratio);
+    float gearRatio() const;
+    void setUpmScale(float scale);
+    float upmScale() const;
 
     void setPid(float kp, float ki, float kd, uint8_t min_pwm, uint8_t max_pwm);
     float kp() const;
@@ -67,6 +71,8 @@ private:
     uint8_t relay_hi_ = 0;
     uint16_t section_mask_ = static_cast<uint16_t>(cfg::sectionMaskLimit());
     uint16_t holes_per_rev_ = cfg::DEFAULT_HOLES_PER_REV;
+    float gear_ratio_ = cfg::DEFAULT_GEAR_RATIO;
+    float upm_scale_ = cfg::DEFAULT_UPM_SCALE;
 
     float kp_ = 0.0f;
     float ki_ = 0.0f;
