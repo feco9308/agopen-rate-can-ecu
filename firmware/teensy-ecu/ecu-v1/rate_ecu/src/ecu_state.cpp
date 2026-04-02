@@ -1,4 +1,5 @@
 #include "ecu_state.h"
+#include "rate_math.h"
 
 void EcuState::begin() {
     mode_ = SystemMode::OFF;
@@ -10,6 +11,8 @@ void EcuState::begin() {
     manual_adjust_ = 0;
     relay_lo_ = 0;
     relay_hi_ = 0;
+    section_mask_ = static_cast<uint16_t>(cfg::sectionMaskLimit());
+    holes_per_rev_ = cfg::DEFAULT_HOLES_PER_REV;
     kp_ = 0.0f;
     ki_ = 0.0f;
     kd_ = 0.0f;
@@ -57,6 +60,36 @@ void EcuState::setRelayState(uint8_t lo, uint8_t hi) {
 }
 uint8_t EcuState::relayLo() const { return relay_lo_; }
 uint8_t EcuState::relayHi() const { return relay_hi_; }
+
+void EcuState::setSectionMask(uint16_t mask) {
+    section_mask_ = static_cast<uint16_t>(mask & cfg::sectionMaskLimit());
+}
+uint16_t EcuState::sectionMask() const { return section_mask_; }
+
+bool EcuState::sectionEnabled(uint8_t nodeId) const {
+    if (nodeId == 0 ||
+        nodeId > cfg::NODE_COUNT_MAX ||
+        nodeId > cfg::ACTIVE_SECTION_COUNT ||
+        nodeId > cfg::PGN_SECTION_BIT_COUNT) {
+        return false;
+    }
+
+    const uint16_t bit = static_cast<uint16_t>(1u << (nodeId - 1u));
+    return (section_mask_ & bit) != 0;
+}
+
+uint8_t EcuState::activeSectionCount() const {
+    const uint8_t tracked_sections = (cfg::ACTIVE_SECTION_COUNT < cfg::PGN_SECTION_BIT_COUNT)
+        ? cfg::ACTIVE_SECTION_COUNT
+        : cfg::PGN_SECTION_BIT_COUNT;
+
+    return rate_math::countActiveSections(section_mask_, tracked_sections);
+}
+
+void EcuState::setHolesPerRev(uint16_t holes) {
+    holes_per_rev_ = (holes == 0) ? cfg::DEFAULT_HOLES_PER_REV : holes;
+}
+uint16_t EcuState::holesPerRev() const { return holes_per_rev_; }
 
 void EcuState::setPid(float kp, float ki, float kd, uint8_t min_pwm, uint8_t max_pwm) {
     kp_ = kp;

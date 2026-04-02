@@ -58,7 +58,7 @@ struct RateSettingsPgn32500 {
 };
 
 struct RelaySettingsPgn32501 {
-    uint8_t module_id = 0;
+    uint8_t mod_sensor_id = 0;
     uint8_t relay_lo = 0;
     uint8_t relay_hi = 0;
     uint8_t power_relay_lo = 0;
@@ -113,7 +113,7 @@ inline bool decode_32500(const uint8_t* data, size_t len, RateSettingsPgn32500& 
 inline bool decode_32501(const uint8_t* data, size_t len, RelaySettingsPgn32501& out) {
     if (len < 10 || !good_crc(data, 10)) return false;
 
-    out.module_id = data[2];
+    out.mod_sensor_id = data[2];
     out.relay_lo = data[3];
     out.relay_hi = data[4];
     out.power_relay_lo = data[5];
