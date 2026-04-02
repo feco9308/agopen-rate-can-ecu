@@ -5,6 +5,7 @@
 #include <NativeEthernetUdp.h>
 
 #include "can_bus.h"
+#include "custom_pgn_protocol.h"
 #include "ecu_state.h"
 #include "node_manager.h"
 
@@ -19,6 +20,8 @@ private:
                           NodeManager* nodeManagers,
                           CanBus& canBus,
                           uint8_t ecuCount,
+                          const IPAddress& remote_ip,
+                          uint16_t remote_port,
                           const uint8_t* data,
                           size_t len,
                           bool& refreshRcTimeout);
@@ -37,9 +40,11 @@ private:
     EthernetUDP agio_;
 
     IPAddress destination_ip_{192, 168, 1, 255};
+    IPAddress custom_destination_ip_{192, 168, 1, 255};
     uint32_t last_rc_rx_ms_ = 0;
     uint32_t last_status_tx_ms_ = 0;
     uint32_t last_custom_diag_tx_ms_ = 0;
+    uint16_t custom_destination_port_ = custom_pgn::UDP_DEST_PORT;
 
     uint8_t module_id_ = 0;
     uint8_t sensor_count_ = cfg::DEFAULT_ACTIVE_SENSOR_CHANNELS;

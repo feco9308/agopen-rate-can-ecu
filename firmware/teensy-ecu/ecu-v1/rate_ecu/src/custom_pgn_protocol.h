@@ -4,6 +4,8 @@
 
 namespace custom_pgn {
 
+static constexpr uint16_t UDP_DEST_PORT              = 30001;
+
 static constexpr uint16_t PGN_ECU_CFG_GET          = 32800;
 static constexpr uint16_t PGN_ECU_CFG_SET          = 32801;
 static constexpr uint16_t PGN_ECU_CFG_SAVE         = 32802;

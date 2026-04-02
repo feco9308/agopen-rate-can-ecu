@@ -71,6 +71,8 @@ void EthernetLink::update(EcuState* ecus, NodeManager* nodeManagers, CanBus& can
         int len = udp_.parsePacket();
 
         if (len > 0) {
+            const IPAddress remote_ip = udp_.remoteIP();
+            const uint16_t remote_port = udp_.remotePort();
             if (len > static_cast<int>(sizeof(data))) {
                 len = sizeof(data);
             }
@@ -78,7 +80,7 @@ void EthernetLink::update(EcuState* ecus, NodeManager* nodeManagers, CanBus& can
             udp_.read(data, len);
 
             bool refreshRcTimeout = false;
-            if (processUdpPacket(ecus, nodeManagers, canBus, ecuCount, data, static_cast<size_t>(len), refreshRcTimeout) &&
+            if (processUdpPacket(ecus, nodeManagers, canBus, ecuCount, remote_ip, remote_port, data, static_cast<size_t>(len), refreshRcTimeout) &&
                 refreshRcTimeout) {
                 last_rc_rx_ms_ = millis();
             }
@@ -104,6 +106,8 @@ bool EthernetLink::processUdpPacket(EcuState* ecus,
                                     NodeManager* nodeManagers,
                                     CanBus& canBus,
                                     uint8_t ecuCount,
+                                    const IPAddress& remote_ip,
+                                    uint16_t remote_port,
                                     const uint8_t* data,
                                     size_t len,
                                     bool& refreshRcTimeout) {
@@ -111,6 +115,10 @@ bool EthernetLink::processUdpPacket(EcuState* ecus,
     if (len < 2) return false;
 
     const uint16_t pgn = static_cast<uint16_t>(data[1] << 8) | data[0];
+    if (pgn >= custom_pgn::PGN_ECU_CFG_GET && pgn <= custom_pgn::PGN_NODE_SET_CAN_SOURCE) {
+        custom_destination_ip_ = remote_ip;
+        custom_destination_port_ = (remote_port == 0) ? custom_pgn::UDP_DEST_PORT : remote_port;
+    }
 
     switch (pgn) {
         case custom_pgn::PGN_ECU_CFG_GET: {
@@ -504,9 +512,18 @@ void EthernetLink::sendCustomPacket(uint16_t pgn, const uint8_t payload[8]) {
     uint8_t packet[custom_pgn::PACKET_LEN];
     custom_pgn::build_packet(pgn, payload, packet);
 
-    udp_.beginPacket(destination_ip_, legacy_rate::UDP_DEST_PORT);
+    udp_.beginPacket(custom_destination_ip_, custom_destination_port_);
     udp_.write(packet, sizeof(packet));
     udp_.endPacket();
+
+    if (ETH_DEBUG_CUSTOM) {
+        Serial.print("[ETH TX CUSTOM] PGN ");
+        Serial.print(pgn);
+        Serial.print(" -> ");
+        Serial.print(custom_destination_ip_);
+        Serial.print(":");
+        Serial.println(custom_destination_port_);
+    }
 }
 
 void EthernetLink::sendConfigStatus(uint8_t block_id, uint8_t index, const EcuState* ecus, uint8_t ecuCount) {
