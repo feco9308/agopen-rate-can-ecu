@@ -5,7 +5,7 @@
 A rendszer CAN buszon kommunikál a Teensy ECU és az ESP32 node-ok között.
 
 ### Sebesség
-- 500 kbit/s
+- 250 kbit/s
 
 ### Formátum
 - Standard CAN (11 bit ID)
