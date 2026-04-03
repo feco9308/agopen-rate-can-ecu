@@ -1,41 +1,35 @@
-# Dokumentáció
+# Documentation
 
-Ez a mappa tartalmazza a vetőgép CAN-alapú ECU rendszerének teljes műszaki dokumentációját.
+This folder contains the main technical documentation for the CAN-based seeder ECU project.
 
-## Tartalom
+## Contents
 
-- `architecture.md`  
-  → rendszer felépítés, komponensek és működés
+- `architecture.md`
+  System structure, components, and high-level behavior.
 
-- `can-matrix.md`  
-  → CAN kommunikációs protokoll (üzenetek, struktúrák)
+- `can-matrix.md`
+  Current runtime CAN message layout for sensor banks `S0..S3`, service CAN, and node feedback.
 
-## Cél
+- `ecu-service-tool-pgns.md`
+  Custom UDP PGNs used by the PySide ECU Service Tool and the Teensy ECU.
 
-A dokumentáció célja, hogy:
+- `session-notes.md`
+  Rolling project notes and recent development context.
 
-- egyértelmű legyen a rendszer működése
-- a firmware fejlesztés egységes logika szerint történjen
-- a CAN kommunikáció stabil és bővíthető legyen
-- több fejlesztő is tudjon dolgozni a projekten
+## Scope
 
-## Fő koncepció
+The documented system contains:
+- Teensy-based central ECU
+- CAN motor nodes
+- Ethernet / UDP interface toward PC tools and Rate App
 
-A rendszer:
+The project replaces PWM motor control with CAN-based reference control using:
+- RPM reference
+- sync position reference
+- node status and diagnostics
 
-- központi ECU (Teensy)
-- CAN buszon kommunikáló motor node-ok (ESP32)
-- LAN kapcsolat a Windows / AOG felé
+## Notes
 
-A hagyományos PWM vezérlés helyett:
-
-👉 CAN-alapú referencia vezérlés van használva
-
-- sebesség (RPM)
-- pozíció (szinkronizáció)
-- 
-## Megjegyzés
-
-Ez a rendszer az AgOpenGPS rate control funkciójára épül.
-
-A vetési ráta számítás nem része ennek a projektnek.
+- Current CAN bitrate in firmware is `250 kbit/s`
+- Current firmware supports `4` sensor channels and `16` sections per channel
+- Rate calculation logic lives in the ECU; the documentation here focuses on communication and control interfaces

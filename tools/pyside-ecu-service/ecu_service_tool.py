@@ -3,7 +3,7 @@ import struct
 import sys
 from dataclasses import dataclass
 
-from PySide6.QtCore import Qt, QDateTime
+from PySide6.QtCore import Qt, QDateTime, QTimer
 from PySide6.QtNetwork import QHostAddress, QUdpSocket
 from PySide6.QtWidgets import (
     QApplication,
@@ -45,6 +45,9 @@ class Pgn:
     ECU_DIAG_STATUS = 32806
     ECU_DIAG_SENSOR = 32807
     ECU_DIAG_NODE_SUMMARY = 32808
+    ECU_DIAG_NODE_DETAIL_A = 32809
+    ECU_DIAG_NODE_DETAIL_B = 32810
+    ECU_DIAG_NODE_DETAIL_REQ = 32811
 
     NODE_DISCOVER = 32900
     NODE_UID_A = 32901
@@ -109,18 +112,40 @@ class SensorDiag:
     avg_pos: int = 0
 
 
+@dataclass
+class NodeDiag:
+    sensor: int = 0
+    node_id: int = 0
+    status_flags: int = 0
+    error_code: int = 0
+    actual_rpm: float = 0.0
+    actual_pos: int = 0
+    bus_voltage: float = 0.0
+    motor_current: float = 0.0
+    controller_temp: int = 0
+    motor_temp: int = 0
+    warning_flags: int = 0
+    fault_flags: int = 0
+
+
 class EcuServiceTool(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Vetogep ECU Service Tool")
         self.resize(1200, 820)
 
-        self.sensor_diags = {0: SensorDiag(), 1: SensorDiag(), 2: SensorDiag()}
+        self.sensor_diags = {0: SensorDiag(), 1: SensorDiag(), 2: SensorDiag(), 3: SensorDiag()}
+        self.node_diags: dict[tuple[int, int], NodeDiag] = {}
         self.current_target_ip = DEFAULT_TARGET_IP
+        self.auto_detail_sensor = 0
+        self.auto_detail_node = 1
 
         self.udp = QUdpSocket(self)
         self.udp.readyRead.connect(self.on_udp_ready_read)
         self.rx_bound = False
+
+        self.auto_detail_timer = QTimer(self)
+        self.auto_detail_timer.timeout.connect(self.request_next_node_details)
 
         central = QWidget()
         root = QVBoxLayout(central)
@@ -172,8 +197,8 @@ class EcuServiceTool(QMainWindow):
         machine_form = QFormLayout(machine_box)
 
         self.active_sensor_spin = QSpinBox()
-        self.active_sensor_spin.setRange(1, 3)
-        self.active_sensor_spin.setValue(3)
+        self.active_sensor_spin.setRange(1, 4)
+        self.active_sensor_spin.setValue(4)
 
         self.row_count_spin = QSpinBox()
         self.row_count_spin.setRange(1, 16)
@@ -310,7 +335,7 @@ class EcuServiceTool(QMainWindow):
         self.diag_ctrl_enable = QCheckBox("Enable")
         self.diag_ctrl_stream = QCheckBox("Stream")
         self.diag_sensor_checks = []
-        for sensor in range(3):
+        for sensor in range(4):
             check = QCheckBox(f"S{sensor}")
             check.setChecked(True)
             self.diag_sensor_checks.append(check)
@@ -323,11 +348,23 @@ class EcuServiceTool(QMainWindow):
         self.diag_period_ctrl_spin.setValue(200)
         self.diag_detail_ctrl_combo = QComboBox()
         self.diag_detail_ctrl_combo.addItems(["Basic", "Extended"])
+        self.detail_sensor_spin = QSpinBox()
+        self.detail_sensor_spin.setRange(0, 3)
+        self.detail_node_spin = QSpinBox()
+        self.detail_node_spin.setRange(1, 16)
+        self.auto_detail_check = QCheckBox("Auto Node Details")
+        self.auto_detail_check.toggled.connect(self.on_auto_detail_toggled)
+        self.auto_detail_period_spin = QSpinBox()
+        self.auto_detail_period_spin.setRange(200, 10000)
+        self.auto_detail_period_spin.setSingleStep(100)
+        self.auto_detail_period_spin.setValue(1000)
 
         btn_send_diag_ctrl = QPushButton("Send Diag Control")
         btn_send_diag_ctrl.clicked.connect(self.send_diag_control)
         btn_request_status = QPushButton("Request ECU Status")
         btn_request_status.clicked.connect(self.request_ecu_status)
+        btn_request_node_detail = QPushButton("Request Node Details")
+        btn_request_node_detail.clicked.connect(self.request_node_details)
 
         controls.addWidget(self.diag_ctrl_enable, 0, 0)
         controls.addWidget(self.diag_ctrl_stream, 0, 1)
@@ -337,19 +374,47 @@ class EcuServiceTool(QMainWindow):
         controls.addWidget(self.diag_period_ctrl_spin, 1, 3)
         controls.addWidget(QLabel("Detail"), 1, 4)
         controls.addWidget(self.diag_detail_ctrl_combo, 1, 5)
-        controls.addWidget(btn_send_diag_ctrl, 2, 0, 1, 3)
-        controls.addWidget(btn_request_status, 2, 3, 1, 3)
+        controls.addWidget(QLabel("Detail Sensor"), 2, 0)
+        controls.addWidget(self.detail_sensor_spin, 2, 1)
+        controls.addWidget(QLabel("Detail Node"), 2, 2)
+        controls.addWidget(self.detail_node_spin, 2, 3)
+        controls.addWidget(btn_request_node_detail, 2, 4, 1, 2)
+        controls.addWidget(self.auto_detail_check, 3, 0, 1, 2)
+        controls.addWidget(QLabel("Auto ms"), 3, 2)
+        controls.addWidget(self.auto_detail_period_spin, 3, 3)
+        controls.addWidget(btn_send_diag_ctrl, 4, 0, 1, 3)
+        controls.addWidget(btn_request_status, 4, 3, 1, 3)
 
-        self.sensor_table = QTableWidget(3, 7)
+        self.sensor_table = QTableWidget(4, 7)
         self.sensor_table.setHorizontalHeaderLabels(
             ["Sensor", "Mode", "Base RPM", "Target UPM", "Online Nodes", "Avg RPM", "Total RPM"]
         )
         self.sensor_table.verticalHeader().setVisible(False)
-        for row in range(3):
+        for row in range(4):
             self.sensor_table.setItem(row, 0, QTableWidgetItem(f"S{row}"))
 
         layout.addWidget(controls_box)
         layout.addWidget(self.sensor_table)
+
+        self.node_table = QTableWidget(0, 12)
+        self.node_table.setHorizontalHeaderLabels(
+            [
+                "Sensor",
+                "Node",
+                "Status",
+                "Error",
+                "Actual RPM",
+                "Pos",
+                "Bus V",
+                "Current A",
+                "Ctrl C",
+                "Motor C",
+                "Warnings",
+                "Faults",
+            ]
+        )
+        self.node_table.verticalHeader().setVisible(False)
+        layout.addWidget(self.node_table)
         return page
 
     def build_node_tab(self) -> QWidget:
@@ -375,11 +440,11 @@ class EcuServiceTool(QMainWindow):
         target_form = QFormLayout(target_box)
         self.uid_edit = QLineEdit("00000000")
         self.sensor_channel_spin = QSpinBox()
-        self.sensor_channel_spin.setRange(0, 2)
+        self.sensor_channel_spin.setRange(0, 3)
         self.node_id_spin = QSpinBox()
         self.node_id_spin.setRange(1, 16)
         self.can_profile_spin = QSpinBox()
-        self.can_profile_spin.setRange(0, 2)
+        self.can_profile_spin.setRange(0, 3)
         target_form.addRow("UID32 Hex", self.uid_edit)
         target_form.addRow("Sensor Channel", self.sensor_channel_spin)
         target_form.addRow("Node ID", self.node_id_spin)
@@ -538,6 +603,79 @@ class EcuServiceTool(QMainWindow):
         self.send_cfg_get(Block.NETWORK, 0)
         self.send_diag_control()
 
+    def request_node_details(self) -> None:
+        self._send_node_detail_request(self.detail_sensor_spin.value(), self.detail_node_spin.value())
+
+    def _selected_sensor_list(self) -> list[int]:
+        sensors = [idx for idx, check in enumerate(self.diag_sensor_checks) if check.isChecked()]
+        if not sensors:
+            sensors = [self.detail_sensor_spin.value()]
+        return sensors
+
+    def _selected_node_list(self) -> list[int]:
+        try:
+            node_mask = int(self.diag_node_mask_edit.text().strip(), 16) & 0xFFFF
+        except ValueError:
+            node_mask = 0
+
+        nodes = [node_id for node_id in range(1, 17) if node_mask & (1 << (node_id - 1))]
+        if not nodes:
+            nodes = [self.detail_node_spin.value()]
+        return nodes
+
+    def _send_node_detail_request(self, sensor: int, node_id: int) -> None:
+        sensor_mask = 1 << sensor
+        node_mask = 1 << (node_id - 1)
+        payload = bytes([
+            sensor_mask,
+            node_mask & 0xFF,
+            (node_mask >> 8) & 0xFF,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ])
+        self.log_line(
+            f"Request node details sensor_mask=0x{sensor_mask:02X} node_mask=0x{node_mask:04X}"
+        )
+        self.send_packet(Pgn.ECU_DIAG_NODE_DETAIL_REQ, payload)
+
+    def on_auto_detail_toggled(self, enabled: bool) -> None:
+        if enabled:
+            self.auto_detail_sensor = self.detail_sensor_spin.value()
+            self.auto_detail_node = self.detail_node_spin.value()
+            self.auto_detail_timer.start(self.auto_detail_period_spin.value())
+            self.log_line(f"Auto node detail polling started ({self.auto_detail_period_spin.value()} ms)")
+        else:
+            self.auto_detail_timer.stop()
+            self.log_line("Auto node detail polling stopped")
+
+    def request_next_node_details(self) -> None:
+        sensors = self._selected_sensor_list()
+        nodes = self._selected_node_list()
+        if not sensors or not nodes:
+            return
+
+        if self.auto_detail_sensor not in sensors:
+            self.auto_detail_sensor = sensors[0]
+        if self.auto_detail_node not in nodes:
+            self.auto_detail_node = nodes[0]
+
+        self.detail_sensor_spin.setValue(self.auto_detail_sensor)
+        self.detail_node_spin.setValue(self.auto_detail_node)
+        self._send_node_detail_request(self.auto_detail_sensor, self.auto_detail_node)
+
+        sensor_idx = sensors.index(self.auto_detail_sensor)
+        node_idx = nodes.index(self.auto_detail_node)
+        node_idx += 1
+        if node_idx >= len(nodes):
+            node_idx = 0
+            sensor_idx = (sensor_idx + 1) % len(sensors)
+
+        self.auto_detail_sensor = sensors[sensor_idx]
+        self.auto_detail_node = nodes[node_idx]
+
     def uid32_value(self) -> int:
         text = self.uid_edit.text().strip().lower().replace("0x", "")
         return int(text or "0", 16) & 0xFFFFFFFF
@@ -670,6 +808,10 @@ class EcuServiceTool(QMainWindow):
             self.handle_diag_sensor(payload)
         elif pgn == Pgn.ECU_DIAG_NODE_SUMMARY:
             self.handle_diag_node_summary(payload)
+        elif pgn == Pgn.ECU_DIAG_NODE_DETAIL_A:
+            self.handle_diag_node_detail_a(payload)
+        elif pgn == Pgn.ECU_DIAG_NODE_DETAIL_B:
+            self.handle_diag_node_detail_b(payload)
         else:
             self.log_line(f"RX PGN {pgn} from {host}:{port} payload={payload.hex(' ')}")
 
@@ -730,6 +872,38 @@ class EcuServiceTool(QMainWindow):
         self.refresh_sensor_row(sensor)
         self.log_line(f"RX ECU_DIAG_NODE_SUMMARY s{sensor} online={diag.online_nodes} total={diag.total_rpm:.1f}")
 
+    def handle_diag_node_detail_a(self, payload: bytes) -> None:
+        sensor = payload[0]
+        node_id = payload[1]
+        key = (sensor, node_id)
+        diag = self.node_diags.get(key, NodeDiag(sensor=sensor, node_id=node_id))
+        diag.status_flags = payload[2]
+        diag.error_code = payload[3]
+        diag.actual_rpm = parse_i16(payload[4], payload[5]) / 10.0
+        diag.actual_pos = parse_u16(payload[6], payload[7])
+        self.node_diags[key] = diag
+        self.refresh_node_table()
+        self.log_line(
+            f"RX ECU_DIAG_NODE_DETAIL_A s{sensor} n{node_id} rpm={diag.actual_rpm:.1f} pos={diag.actual_pos}"
+        )
+
+    def handle_diag_node_detail_b(self, payload: bytes) -> None:
+        sensor = payload[0]
+        node_id = payload[1]
+        key = (sensor, node_id)
+        diag = self.node_diags.get(key, NodeDiag(sensor=sensor, node_id=node_id))
+        diag.bus_voltage = payload[2] / 10.0
+        diag.motor_current = payload[3] / 10.0
+        diag.controller_temp = payload[4]
+        diag.motor_temp = payload[5]
+        diag.warning_flags = payload[6]
+        diag.fault_flags = payload[7]
+        self.node_diags[key] = diag
+        self.refresh_node_table()
+        self.log_line(
+            f"RX ECU_DIAG_NODE_DETAIL_B s{sensor} n{node_id} bus={diag.bus_voltage:.1f} current={diag.motor_current:.1f}"
+        )
+
     def refresh_sensor_row(self, sensor: int) -> None:
         diag = self.sensor_diags[sensor]
         values = [
@@ -748,6 +922,34 @@ class EcuServiceTool(QMainWindow):
                 self.sensor_table.setItem(sensor, col, item)
             item.setText(value)
             if col == 0:
+                item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+
+    def refresh_node_table(self) -> None:
+        rows = sorted(self.node_diags.values(), key=lambda item: (item.sensor, item.node_id))
+        self.node_table.setRowCount(len(rows))
+
+        for row, diag in enumerate(rows):
+            values = [
+                f"S{diag.sensor}",
+                str(diag.node_id),
+                f"0x{diag.status_flags:02X}",
+                str(diag.error_code),
+                f"{diag.actual_rpm:.1f}",
+                str(diag.actual_pos),
+                f"{diag.bus_voltage:.1f}",
+                f"{diag.motor_current:.1f}",
+                str(diag.controller_temp),
+                str(diag.motor_temp),
+                f"0x{diag.warning_flags:02X}",
+                f"0x{diag.fault_flags:02X}",
+            ]
+
+            for col, value in enumerate(values):
+                item = self.node_table.item(row, col)
+                if item is None:
+                    item = QTableWidgetItem()
+                    self.node_table.setItem(row, col, item)
+                item.setText(value)
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
 
     def log_line(self, text: str) -> None:
