@@ -33,6 +33,12 @@ private:
     void sendDiagStatus(const EcuState* ecus, uint8_t ecuCount);
     void sendDiagSensor(uint8_t sensorIndex, const EcuState& ecu);
     void sendDiagNodeSummary(uint8_t sensorIndex, const EcuState& ecu, const NodeManager& nodeManager);
+    void sendDiagNodeDetailA(uint8_t sensorIndex, uint8_t nodeId, const NodeRuntimeState& nodeState);
+    void sendDiagNodeDetailB(uint8_t sensorIndex, uint8_t nodeId, const NodeRuntimeState& nodeState);
+    void sendDiagNodeDetails(const NodeManager* nodeManagers,
+                             uint8_t sensorCount,
+                             uint8_t sensorMask,
+                             uint16_t nodeMask);
     void sendCustomDiagStream(const EcuState* ecus, const NodeManager* nodeManagers, uint8_t sensorCount);
 
 private:
@@ -48,7 +54,7 @@ private:
 
     uint8_t module_id_ = 0;
     uint8_t sensor_count_ = cfg::DEFAULT_ACTIVE_SENSOR_CHANNELS;
-    uint8_t diag_sensor_mask_ = 0x07;
+    uint8_t diag_sensor_mask_ = 0x0F;
     uint16_t diag_node_mask_ = 0xFFFF;
 
     uint16_t ino_id_ = 0x0001;

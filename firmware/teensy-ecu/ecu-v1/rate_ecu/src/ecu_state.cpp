@@ -7,6 +7,7 @@ void EcuState::begin() {
     base_rpm_ = 0.0f;
     drive_ = false;
     sync_ = false;
+    diag_ = false;
     rate_source_upm_ = 0.0f;
     meter_cal_ = 0.0f;
     manual_adjust_ = 0;
@@ -41,10 +42,14 @@ bool EcuState::drive() const { return drive_; }
 void EcuState::setSync(bool en) { sync_ = en; }
 bool EcuState::sync() const { return sync_; }
 
+void EcuState::setDiag(bool en) { diag_ = en; }
+bool EcuState::diag() const { return diag_; }
+
 uint8_t EcuState::flags() const {
     uint8_t f = 0;
     if (drive_) f |= CTRL_DRIVE_ENABLE;
     if (sync_)  f |= CTRL_SYNC_ENABLE;
+    if (diag_)  f |= CTRL_DIAG_ENABLE;
     return f;
 }
 

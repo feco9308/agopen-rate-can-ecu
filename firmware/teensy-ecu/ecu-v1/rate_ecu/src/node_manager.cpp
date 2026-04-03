@@ -34,6 +34,18 @@ void NodeManager::onStatusFrame(uint8_t nodeId, const NodeStatusFastFrame& frame
     n.sync_error = frame.sync_error_x256rev;
 }
 
+void NodeManager::onDiagFrame(uint8_t nodeId, const NodeDiagFrame& frame) {
+    if (nodeId == 0 || nodeId > cfg::NODE_COUNT_MAX) return;
+
+    auto& n = nodes_[nodeId];
+    n.bus_voltage = frame.bus_voltage_x10 / 10.0f;
+    n.motor_current = frame.motor_current_x10 / 10.0f;
+    n.controller_temp = frame.controller_temp_c;
+    n.motor_temp = frame.motor_temp_c;
+    n.fault_flags = frame.fault_flags;
+    n.warning_flags = frame.warning_flags;
+}
+
 const NodeRuntimeState& NodeManager::node(uint8_t nodeId) const {
     return nodes_[nodeId];
 }

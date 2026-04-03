@@ -17,6 +17,8 @@ public:
 
     void setSync(bool en);
     bool sync() const;
+    void setDiag(bool en);
+    bool diag() const;
 
     uint8_t flags() const;
 
@@ -62,6 +64,7 @@ private:
     float base_rpm_ = 0.0f;
     bool drive_ = false;
     bool sync_ = false;
+    bool diag_ = false;
 
     float rate_source_upm_ = 0.0f;
     float meter_cal_ = 0.0f;

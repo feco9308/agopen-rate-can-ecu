@@ -6,11 +6,12 @@
 #include "runtime_config.h"
 #include "service_can_protocol.h"
 
-FlexCAN_T4<CAN2, RX_SIZE_256, TX_SIZE_16> Can0;
+FlexCAN_T4<CAN2, RX_SIZE_256, TX_SIZE_256> Can0;
 
 static constexpr bool CAN_TX_DEBUG = false;
 static constexpr bool CAN_RX_DEBUG = false;
 static constexpr bool CAN_SERVICE_DEBUG = true;
+static constexpr bool CAN_TX_WARNINGS = true;
 
 bool CanBus::begin() {
     Serial.print("CAN init start, baud=");
@@ -155,6 +156,46 @@ void CanBus::handleFrame(const CAN_message_t& msg, NodeManager* nodeManagers, ui
 
             return;
         }
+
+        if (id >= (profile.node_diag_base + 1u) &&
+            id < (profile.node_diag_base + cfg::NODE_COUNT_MAX + 1u) &&
+            msg.len == 8) {
+
+            const uint8_t nodeId = static_cast<uint8_t>(id - profile.node_diag_base);
+
+            NodeDiagFrame frame{};
+            frame.bus_voltage_x10 = static_cast<uint16_t>(msg.buf[0] | (msg.buf[1] << 8));
+            frame.motor_current_x10 = static_cast<int16_t>(msg.buf[2] | (msg.buf[3] << 8));
+            frame.controller_temp_c = msg.buf[4];
+            frame.motor_temp_c = msg.buf[5];
+            frame.fault_flags = msg.buf[6];
+            frame.warning_flags = msg.buf[7];
+
+            nodeManagers[channelIndex].onDiagFrame(nodeId, frame);
+
+            if (CAN_RX_DEBUG) {
+                Serial.print("[CAN RX] ch=");
+                Serial.print(channelIndex);
+                Serial.print(" NODE_DIAG id=0x");
+                Serial.print(id, HEX);
+                Serial.print(" node=");
+                Serial.print(nodeId);
+                Serial.print(" busV=");
+                Serial.print(frame.bus_voltage_x10 / 10.0f);
+                Serial.print(" current=");
+                Serial.print(frame.motor_current_x10 / 10.0f);
+                Serial.print(" ctrlC=");
+                Serial.print(frame.controller_temp_c);
+                Serial.print(" motorC=");
+                Serial.print(frame.motor_temp_c);
+                Serial.print(" warn=0x");
+                Serial.print(frame.warning_flags, HEX);
+                Serial.print(" fault=0x");
+                Serial.println(frame.fault_flags, HEX);
+            }
+
+            return;
+        }
     }
 }
 
@@ -270,6 +311,16 @@ void CanBus::sendNodeCommands(uint8_t channelIndex,
         msg.buf[7] = frame.reserved;
 
         const int ok = Can0.write(msg);
+
+        if (!ok && CAN_TX_WARNINGS) {
+            Serial.print("[CAN TX WARN] ch=");
+            Serial.print(channelIndex);
+            Serial.print(" node=");
+            Serial.print(nodeId);
+            Serial.print(" id=0x");
+            Serial.print(msg.id, HEX);
+            Serial.println(" queue full / send failed");
+        }
 
         if (CAN_TX_DEBUG) {
             Serial.print("[CAN TX NODE] ch=");

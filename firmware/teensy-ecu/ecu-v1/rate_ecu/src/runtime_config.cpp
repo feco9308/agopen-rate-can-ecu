@@ -187,6 +187,7 @@ void applyToEcu(EcuState& ecu) {
     ecu.setHolesPerRev(holesPerRev());
     ecu.setGearRatio(gearRatio());
     ecu.setUpmScale(upmScale());
+    ecu.setDiag(diagEnabled());
 }
 
 void applyToEcus(EcuState* ecus, uint8_t max_count) {

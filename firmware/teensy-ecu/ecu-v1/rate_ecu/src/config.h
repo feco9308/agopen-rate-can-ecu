@@ -13,8 +13,8 @@ static constexpr float RPM_MIN = 0.0f;
 static constexpr float RPM_MAX = 1000.0f;
 
 // geometry / machine defaults
-static constexpr uint8_t MAX_SENSOR_CHANNELS = 3;           // compiled-in capacity
-static constexpr uint8_t DEFAULT_ACTIVE_SENSOR_CHANNELS = 3;
+static constexpr uint8_t MAX_SENSOR_CHANNELS = 4;           // compiled-in capacity
+static constexpr uint8_t DEFAULT_ACTIVE_SENSOR_CHANNELS = 4;
 static constexpr uint8_t PGN_SECTION_BIT_COUNT = 16;          // relay_lo + relay_hi
 static constexpr uint8_t NODE_COUNT_MAX = 16;                // current CAN node range uses 0x101..0x110
 static constexpr uint8_t DEFAULT_CONFIGURED_ROW_COUNT = 6;   // rows/sections configured in the machine
@@ -49,6 +49,7 @@ static constexpr CanProfile CAN_PROFILES[MAX_SENSOR_CHANNELS] = {
     {0x080, 0x081, 0x082, 0x100, 0x140, 0x160, 0x180, 0x1C0, 0},
     {0x200, 0x201, 0x202, 0x210, 0x240, 0x260, 0x280, 0x2C0, 1},
     {0x300, 0x301, 0x302, 0x310, 0x340, 0x360, 0x380, 0x3C0, 1},
+    {0x400, 0x401, 0x402, 0x410, 0x440, 0x460, 0x480, 0x4C0, 1},
 };
 
 constexpr uint32_t sectionMaskLimit() {
@@ -70,7 +71,8 @@ enum class SystemMode : uint8_t {
 enum ControlFlags : uint8_t {
     CTRL_DRIVE_ENABLE = 1 << 0,
     CTRL_SYNC_ENABLE  = 1 << 1,
-    CTRL_ESTOP        = 1 << 2
+    CTRL_ESTOP        = 1 << 2,
+    CTRL_DIAG_ENABLE  = 1 << 3
 };
 
 enum NodeCommandCode : uint8_t {
@@ -114,6 +116,15 @@ struct NodeStatusFastFrame {
     int8_t sync_error_x256rev;
 };
 
+struct NodeDiagFrame {
+    uint16_t bus_voltage_x10;
+    int16_t motor_current_x10;
+    uint8_t controller_temp_c;
+    uint8_t motor_temp_c;
+    uint8_t fault_flags;
+    uint8_t warning_flags;
+};
+
 struct NodeRuntimeState {
     bool online = false;
     uint32_t last_seen_ms = 0;
@@ -123,4 +134,10 @@ struct NodeRuntimeState {
     uint16_t actual_pos = 0;
     uint8_t alive_counter = 0;
     int8_t sync_error = 0;
+    float bus_voltage = 0.0f;
+    float motor_current = 0.0f;
+    uint8_t controller_temp = 0;
+    uint8_t motor_temp = 0;
+    uint8_t fault_flags = 0;
+    uint8_t warning_flags = 0;
 };

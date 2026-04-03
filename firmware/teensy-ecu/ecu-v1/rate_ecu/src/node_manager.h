@@ -10,6 +10,7 @@ public:
     void update();
 
     void onStatusFrame(uint8_t nodeId, const NodeStatusFastFrame& frame);
+    void onDiagFrame(uint8_t nodeId, const NodeDiagFrame& frame);
 
     const NodeRuntimeState& node(uint8_t nodeId) const;
     NodeRuntimeState& node(uint8_t nodeId);

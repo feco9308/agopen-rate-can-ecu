@@ -155,6 +155,7 @@ bool EthernetLink::processUdpPacket(EcuState* ecus,
                     runtime_cfg::setDiagStreamEnabled(data[5] != 0);
                     runtime_cfg::setDiagPeriodMs(static_cast<uint16_t>(data[6]) * 10u);
                     runtime_cfg::setDiagDetailLevel(data[7]);
+                    applyRuntimeConfigToEcus(ecus);
                     break;
 
                 case custom_pgn::CFG_BLOCK_NETWORK:
@@ -198,8 +199,18 @@ bool EthernetLink::processUdpPacket(EcuState* ecus,
             diag_node_mask_ = static_cast<uint16_t>(data[5] | (data[6] << 8));
             runtime_cfg::setDiagPeriodMs(static_cast<uint16_t>(data[7]) * 10u);
             runtime_cfg::setDiagDetailLevel(data[8]);
+            applyRuntimeConfigToEcus(ecus);
 
             sendDiagStatus(ecus, ecuCount);
+            return true;
+        }
+
+        case custom_pgn::PGN_ECU_DIAG_NODE_DETAIL_REQ: {
+            if (!custom_pgn::good_crc(data, len)) return false;
+
+            const uint8_t sensor_mask = data[2];
+            const uint16_t node_mask = static_cast<uint16_t>(data[3] | (data[4] << 8));
+            sendDiagNodeDetails(nodeManagers, ecuCount, sensor_mask, node_mask);
             return true;
         }
 
@@ -651,6 +662,58 @@ void EthernetLink::sendDiagNodeSummary(uint8_t sensorIndex, const EcuState& ecu,
     payload[7] = static_cast<uint8_t>((avg_pos_u16 >> 8) & 0xFF);
 
     sendCustomPacket(custom_pgn::PGN_ECU_DIAG_NODE_SUMMARY, payload);
+}
+
+void EthernetLink::sendDiagNodeDetailA(uint8_t sensorIndex, uint8_t nodeId, const NodeRuntimeState& nodeState) {
+    uint8_t payload[8]{};
+    payload[0] = sensorIndex;
+    payload[1] = nodeId;
+    payload[2] = nodeState.status_flags;
+    payload[3] = nodeState.error_code;
+
+    const int16_t actual_rpm_x10 = clampInt16(static_cast<int32_t>(nodeState.actual_rpm * 10.0f));
+    payload[4] = static_cast<uint8_t>(actual_rpm_x10 & 0xFF);
+    payload[5] = static_cast<uint8_t>((actual_rpm_x10 >> 8) & 0xFF);
+    payload[6] = static_cast<uint8_t>(nodeState.actual_pos & 0xFF);
+    payload[7] = static_cast<uint8_t>((nodeState.actual_pos >> 8) & 0xFF);
+
+    sendCustomPacket(custom_pgn::PGN_ECU_DIAG_NODE_DETAIL_A, payload);
+}
+
+void EthernetLink::sendDiagNodeDetailB(uint8_t sensorIndex, uint8_t nodeId, const NodeRuntimeState& nodeState) {
+    uint8_t payload[8]{};
+    payload[0] = sensorIndex;
+    payload[1] = nodeId;
+    payload[2] = static_cast<uint8_t>(clampValue<int32_t>(static_cast<int32_t>(nodeState.bus_voltage * 10.0f), 0, 255));
+    payload[3] = static_cast<uint8_t>(clampValue<int32_t>(static_cast<int32_t>(nodeState.motor_current * 10.0f), 0, 255));
+    payload[4] = nodeState.controller_temp;
+    payload[5] = nodeState.motor_temp;
+    payload[6] = nodeState.warning_flags;
+    payload[7] = nodeState.fault_flags;
+
+    sendCustomPacket(custom_pgn::PGN_ECU_DIAG_NODE_DETAIL_B, payload);
+}
+
+void EthernetLink::sendDiagNodeDetails(const NodeManager* nodeManagers,
+                                       uint8_t sensorCount,
+                                       uint8_t sensorMask,
+                                       uint16_t nodeMask) {
+    uint8_t maxNodeCommands = runtime_cfg::configuredRowCount();
+    if (maxNodeCommands > cfg::NODE_COUNT_MAX) {
+        maxNodeCommands = cfg::NODE_COUNT_MAX;
+    }
+
+    for (uint8_t sensorIndex = 0; sensorIndex < sensorCount; ++sensorIndex) {
+        if ((sensorMask & (1u << sensorIndex)) == 0) continue;
+
+        for (uint8_t nodeId = 1; nodeId <= maxNodeCommands; ++nodeId) {
+            if ((nodeMask & (1u << (nodeId - 1))) == 0) continue;
+
+            const NodeRuntimeState& nodeState = nodeManagers[sensorIndex].node(nodeId);
+            sendDiagNodeDetailA(sensorIndex, nodeId, nodeState);
+            sendDiagNodeDetailB(sensorIndex, nodeId, nodeState);
+        }
+    }
 }
 
 void EthernetLink::sendCustomDiagStream(const EcuState* ecus, const NodeManager* nodeManagers, uint8_t sensorCount) {
