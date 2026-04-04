@@ -9,7 +9,8 @@
 #include "runtime_config.h"
 
 namespace {
-constexpr uint32_t RC_TIMEOUT_MS = 1000;
+constexpr uint32_t RC_TIMEOUT_WARN_MS = 1000;
+constexpr uint32_t RC_TIMEOUT_HARD_MS = 3000;
 constexpr uint32_t STATUS_TX_MS  = 200;
 
 constexpr uint8_t DEFAULT_IP0 = 192;
@@ -144,9 +145,8 @@ bool EthernetLink::processUdpPacket(EcuState* ecus,
                     break;
 
                 case custom_pgn::CFG_BLOCK_DRIVE:
-                    runtime_cfg::setGearRatio(static_cast<float>(data[4] | (data[5] << 8)) / 100.0f);
-                    runtime_cfg::setTrimRpmLimit(static_cast<float>(static_cast<int16_t>(data[6] | (data[7] << 8))) / 10.0f);
-                    runtime_cfg::setPositionKp(static_cast<float>(data[8] | (data[9] << 8)) / 1000.0f);
+                    runtime_cfg::setTrimRpmLimit(static_cast<float>(static_cast<int16_t>(data[4] | (data[5] << 8))) / 10.0f);
+                    runtime_cfg::setPositionKp(static_cast<float>(data[6] | (data[7] << 8)) / 1000.0f);
                     applyRuntimeConfigToEcus(ecus);
                     break;
 
@@ -165,6 +165,11 @@ bool EthernetLink::processUdpPacket(EcuState* ecus,
                     break;
 
                 case custom_pgn::CFG_BLOCK_CHANNEL:
+                    runtime_cfg::setDriveRatio(index, static_cast<float>(data[4] | (data[5] << 8)) / 100.0f);
+                    runtime_cfg::setMotorRatio(index, static_cast<float>(data[6] | (data[7] << 8)) / 100.0f);
+                    applyRuntimeConfigToEcus(ecus);
+                    break;
+
                 default:
                     break;
             }
@@ -353,7 +358,7 @@ bool EthernetLink::processUdpPacket(EcuState* ecus,
 
             const uint8_t active_sections = ecu.activeSectionCount();
             const float motor_rpm = rate_math::targetUpmToMotorRpm(
-                p.target_upm, ecu.upmScale(), ecu.holesPerRev(), active_sections, ecu.gearRatio()
+                p.target_upm, ecu.upmScale(), ecu.holesPerRev(), active_sections, ecu.combinedRatio()
             );
             ecu.setBaseRpm(master_on ? motor_rpm : 0.0f);
 
@@ -368,8 +373,12 @@ bool EthernetLink::processUdpPacket(EcuState* ecus,
                 Serial.print(p.manual_pwm);
                 Serial.print(" holes=");
                 Serial.print(ecu.holesPerRev());
-                Serial.print(" gear=");
-                Serial.print(ecu.gearRatio(), 3);
+                Serial.print(" drive=");
+                Serial.print(ecu.driveRatio(), 3);
+                Serial.print(" motor=");
+                Serial.print(ecu.motorRatio(), 3);
+                Serial.print(" combined=");
+                Serial.print(ecu.combinedRatio(), 3);
                 Serial.print(" scale=");
                 Serial.print(ecu.upmScale(), 3);
                 Serial.print(" activeSections=");
@@ -505,13 +514,18 @@ void EthernetLink::processAgioPacket(const uint8_t* data, size_t len, EcuState* 
 void EthernetLink::applyTimeout(EcuState* ecus, uint8_t ecuCount) {
     const uint32_t now = millis();
 
-    if (last_rc_rx_ms_ != 0 && (now - last_rc_rx_ms_ > RC_TIMEOUT_MS)) {
-        for (uint8_t sensorIndex = 0; sensorIndex < ecuCount; ++sensorIndex) {
-            ecus[sensorIndex].setDrive(false);
-            ecus[sensorIndex].setSync(false);
-            ecus[sensorIndex].setBaseRpm(0.0f);
-            ecus[sensorIndex].setMode(SystemMode::OFF);
-        }
+    if (last_rc_rx_ms_ == 0) return;
+
+    const uint32_t age_ms = now - last_rc_rx_ms_;
+    if (age_ms <= RC_TIMEOUT_HARD_MS) {
+        return;
+    }
+
+    for (uint8_t sensorIndex = 0; sensorIndex < ecuCount; ++sensorIndex) {
+        ecus[sensorIndex].setDrive(false);
+        ecus[sensorIndex].setSync(false);
+        ecus[sensorIndex].setBaseRpm(0.0f);
+        ecus[sensorIndex].setMode(SystemMode::OFF);
     }
 }
 
@@ -556,15 +570,12 @@ void EthernetLink::sendConfigStatus(uint8_t block_id, uint8_t index, const EcuSt
         }
 
         case custom_pgn::CFG_BLOCK_DRIVE: {
-            const uint16_t gear_x100 = static_cast<uint16_t>(runtime_cfg::gearRatio() * 100.0f);
             const int16_t trim_x10 = static_cast<int16_t>(runtime_cfg::trimRpmLimit() * 10.0f);
             const uint16_t kp_x1000 = static_cast<uint16_t>(runtime_cfg::positionKp() * 1000.0f);
-            payload[2] = static_cast<uint8_t>(gear_x100 & 0xFF);
-            payload[3] = static_cast<uint8_t>((gear_x100 >> 8) & 0xFF);
-            payload[4] = static_cast<uint8_t>(trim_x10 & 0xFF);
-            payload[5] = static_cast<uint8_t>((trim_x10 >> 8) & 0xFF);
-            payload[6] = static_cast<uint8_t>(kp_x1000 & 0xFF);
-            payload[7] = static_cast<uint8_t>((kp_x1000 >> 8) & 0xFF);
+            payload[2] = static_cast<uint8_t>(trim_x10 & 0xFF);
+            payload[3] = static_cast<uint8_t>((trim_x10 >> 8) & 0xFF);
+            payload[4] = static_cast<uint8_t>(kp_x1000 & 0xFF);
+            payload[5] = static_cast<uint8_t>((kp_x1000 >> 8) & 0xFF);
             break;
         }
 
@@ -578,11 +589,16 @@ void EthernetLink::sendConfigStatus(uint8_t block_id, uint8_t index, const EcuSt
             break;
 
         case custom_pgn::CFG_BLOCK_CHANNEL:
-            payload[0] = block_id;
-            payload[1] = index;
-            payload[2] = (index < ecuCount) ? 1 : 0;
-            payload[3] = (index < cfg::MAX_SENSOR_CHANNELS) ? index : 0;
-            payload[4] = (index == 0) ? 0 : 1;
+            if (index < cfg::MAX_SENSOR_CHANNELS) {
+                const uint16_t drive_x100 = static_cast<uint16_t>(runtime_cfg::driveRatio(index) * 100.0f);
+                const uint16_t motor_x100 = static_cast<uint16_t>(runtime_cfg::motorRatio(index) * 100.0f);
+                payload[2] = static_cast<uint8_t>(drive_x100 & 0xFF);
+                payload[3] = static_cast<uint8_t>((drive_x100 >> 8) & 0xFF);
+                payload[4] = static_cast<uint8_t>(motor_x100 & 0xFF);
+                payload[5] = static_cast<uint8_t>((motor_x100 >> 8) & 0xFF);
+                payload[6] = (index < ecuCount) ? 1 : 0;
+                payload[7] = index;
+            }
             break;
 
         case custom_pgn::CFG_BLOCK_NETWORK:
@@ -613,7 +629,7 @@ void EthernetLink::sendDiagStatus(const EcuState* ecus, uint8_t ecuCount) {
     payload[2] = (Ethernet.linkStatus() == LinkON) ? 1 : 0;
     payload[3] = 1;
     payload[4] = runtime_cfg::diagEnabled() ? 1 : 0;
-    payload[5] = (last_rc_rx_ms_ != 0 && (millis() - last_rc_rx_ms_ > RC_TIMEOUT_MS)) ? 1 : 0;
+    payload[5] = (last_rc_rx_ms_ != 0 && (millis() - last_rc_rx_ms_ > RC_TIMEOUT_WARN_MS)) ? 1 : 0;
     const uint16_t uptime_s = static_cast<uint16_t>(millis() / 1000u);
     payload[6] = static_cast<uint8_t>(uptime_s & 0xFF);
     payload[7] = static_cast<uint8_t>((uptime_s >> 8) & 0xFF);
@@ -650,14 +666,14 @@ void EthernetLink::sendDiagNodeSummary(uint8_t sensorIndex, const EcuState& ecu,
     payload[0] = sensorIndex;
     payload[1] = nodeManager.onlineNodeCount(ecu);
 
-    const int16_t avg_rpm_x10 = clampInt16(static_cast<int32_t>(nodeManager.averageActualRpm(ecu) * 10.0f));
-    const int16_t total_rpm_x10 = clampInt16(static_cast<int32_t>(nodeManager.totalActualRpm(ecu) * 10.0f));
+    const uint16_t avg_rpm_u16 = clampValue<uint32_t>(static_cast<uint32_t>(nodeManager.averageActualRpm(ecu) + 0.5f), 0u, 65535u);
+    const uint16_t total_rpm_u16 = clampValue<uint32_t>(static_cast<uint32_t>(nodeManager.totalActualRpm(ecu) + 0.5f), 0u, 65535u);
     const uint16_t avg_pos_u16 = nodeManager.averageActualPos(ecu);
 
-    payload[2] = static_cast<uint8_t>(avg_rpm_x10 & 0xFF);
-    payload[3] = static_cast<uint8_t>((avg_rpm_x10 >> 8) & 0xFF);
-    payload[4] = static_cast<uint8_t>(total_rpm_x10 & 0xFF);
-    payload[5] = static_cast<uint8_t>((total_rpm_x10 >> 8) & 0xFF);
+    payload[2] = static_cast<uint8_t>(avg_rpm_u16 & 0xFF);
+    payload[3] = static_cast<uint8_t>((avg_rpm_u16 >> 8) & 0xFF);
+    payload[4] = static_cast<uint8_t>(total_rpm_u16 & 0xFF);
+    payload[5] = static_cast<uint8_t>((total_rpm_u16 >> 8) & 0xFF);
     payload[6] = static_cast<uint8_t>(avg_pos_u16 & 0xFF);
     payload[7] = static_cast<uint8_t>((avg_pos_u16 >> 8) & 0xFF);
 
@@ -671,9 +687,9 @@ void EthernetLink::sendDiagNodeDetailA(uint8_t sensorIndex, uint8_t nodeId, cons
     payload[2] = nodeState.status_flags;
     payload[3] = nodeState.error_code;
 
-    const int16_t actual_rpm_x10 = clampInt16(static_cast<int32_t>(nodeState.actual_rpm * 10.0f));
-    payload[4] = static_cast<uint8_t>(actual_rpm_x10 & 0xFF);
-    payload[5] = static_cast<uint8_t>((actual_rpm_x10 >> 8) & 0xFF);
+    const uint16_t actual_rpm_u16 = clampValue<uint32_t>(static_cast<uint32_t>(nodeState.actual_rpm + 0.5f), 0u, 65535u);
+    payload[4] = static_cast<uint8_t>(actual_rpm_u16 & 0xFF);
+    payload[5] = static_cast<uint8_t>((actual_rpm_u16 >> 8) & 0xFF);
     payload[6] = static_cast<uint8_t>(nodeState.actual_pos & 0xFF);
     payload[7] = static_cast<uint8_t>((nodeState.actual_pos >> 8) & 0xFF);
 
@@ -750,7 +766,7 @@ void EthernetLink::sendStatus(const EcuState* ecus, const NodeManager* nodeManag
     data[2] = legacy_rate::build_mod_sensor_id(module_id_, 0);
 
     const float actualUpm0 = rate_math::summedMotorRpmToFeedbackUpm(
-        nodeManagers[0].totalActualRpm(ecu), ecu.upmScale(), ecu.holesPerRev(), ecu.gearRatio()
+        nodeManagers[0].totalActualRpm(ecu), ecu.upmScale(), ecu.holesPerRev(), ecu.combinedRatio()
     );
     const uint32_t applied = static_cast<uint32_t>(actualUpm0 * 1000.0f);
     data[3] = static_cast<uint8_t>(applied & 0xFF);
@@ -793,7 +809,7 @@ void EthernetLink::sendStatus(const EcuState* ecus, const NodeManager* nodeManag
             nodeManagers[sensorId].totalActualRpm(sensorEcu),
             sensorEcu.upmScale(),
             sensorEcu.holesPerRev(),
-            sensorEcu.gearRatio()
+            sensorEcu.combinedRatio()
         );
         const uint32_t appliedSensor = static_cast<uint32_t>(actualUpm * 1000.0f);
         data[3] = static_cast<uint8_t>(appliedSensor & 0xFF);

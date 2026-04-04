@@ -172,7 +172,7 @@ def set_or_clear(flags: int, bit: int, enabled: bool) -> int:
 class GlobalControlState:
     system_mode: int = MODE_OFF
     control_flags: int = 0
-    base_rpm_x10: int = 0
+    base_rpm_u16: int = 0
     sync_pos_u16: int = 0
     sequence: int = 0
     last_rx: float = 0.0
@@ -245,9 +245,9 @@ class MotorSimulatorEngine:
         self.last_tx = "-"
         self.tx_blocked_until = 0.0
         self.publish_status = True
-        self.publish_diag = False
+        self.publish_diag = True
         self.publish_presence = False
-        self.manual_diag_override = False
+        self.allow_diag_tx = True
         self.sensor_enabled: Dict[int, bool] = {i: True for i in range(SENSOR_TAB_COUNT)}
         self.globals: Dict[int, GlobalControlState] = {i: GlobalControlState() for i in range(SENSOR_TAB_COUNT)}
         self.nodes: List[SimNode] = []
@@ -279,6 +279,15 @@ class MotorSimulatorEngine:
         active_flags = node.last_cmd_rx > 0.0 and (node.enabled or node.should_run or node.warning_flags != 0 or node.fault_flags != 0)
         identifying = now < node.identify_until
         return cmd_fresh or spinning or active_flags or identifying
+
+    def _node_should_publish_diag(self, node: SimNode, now: float) -> bool:
+        if not self.allow_diag_tx:
+            return False
+        if not self.sensor_enabled.get(node.sensor_channel, True):
+            return False
+        g = self.globals[node.can_profile_index]
+        diag_enable = bool(g.control_flags & CTRL_DIAG_ENABLE)
+        return diag_enable and self._node_should_publish(node, now)
 
     def _create_default_nodes(self) -> None:
         self.nodes.clear()
@@ -407,13 +416,13 @@ class MotorSimulatorEngine:
                     g = self.globals[sensor_index]
                     g.system_mode = data[0]
                     g.control_flags = data[1]
-                    g.base_rpm_x10 = i16_from_le(data, 2)
+                    g.base_rpm_u16 = u16_from_le(data, 2)
                     g.sync_pos_u16 = u16_from_le(data, 4)
                     g.sequence = data[6]
                     g.last_rx = time.time()
                     g.valid = True
                 self.log(
-                    f"RX GLOBAL_CONTROL s{sensor_index}: mode={data[0]} flags=0x{data[1]:02X} rpm={i16_from_le(data, 2)/10.0:.1f}"
+                    f"RX GLOBAL_CONTROL s{sensor_index}: mode={data[0]} flags=0x{data[1]:02X} rpm={u16_from_le(data, 2):.1f}"
                 )
                 return
 
@@ -592,7 +601,7 @@ class MotorSimulatorEngine:
                     with self.lock:
                         nodes = list(self.nodes)
                     for node in nodes:
-                        if self._node_should_publish(node, now):
+                        if self._node_should_publish_diag(node, now):
                             self._send_diag(node)
 
                 if self.publish_presence and now - last_presence >= PRESENCE_PERIOD_S:
@@ -628,11 +637,6 @@ class MotorSimulatorEngine:
         sync_enable = bool(g.control_flags & CTRL_SYNC_ENABLE)
         estop_flag = bool(g.control_flags & CTRL_ESTOP) or g.estop
         diag_enable = bool(g.control_flags & CTRL_DIAG_ENABLE)
-
-        if self.manual_diag_override:
-            self.publish_diag = True
-        else:
-            self.publish_diag = diag_enable
         mode_allows_run = g.system_mode in (MODE_MANUAL, MODE_AUTO, MODE_CALIBRATION)
 
         actual_pos_u16 = int(wrap_rev(node.pos_rev) * 65535.0) & 0xFFFF
@@ -640,10 +644,10 @@ class MotorSimulatorEngine:
         pos_err_rev = pos_err / 65536.0
 
         sync_corr = 60.0 * pos_err_rev if sync_enable else 0.0
-        cmd_rpm = (g.base_rpm_x10 / 10.0) + (node.trim_rpm_x10 / 10.0) + sync_corr
+        cmd_rpm = float(g.base_rpm_u16) + (node.trim_rpm_x10 / 10.0) + sync_corr
         if node.invert_dir:
             cmd_rpm = -cmd_rpm
-        cmd_rpm = clamp(cmd_rpm, -1000.0, 1000.0)
+        cmd_rpm = clamp(cmd_rpm, -10000.0, 10000.0)
 
         should_run = (
             has_seen_cmd
@@ -665,13 +669,13 @@ class MotorSimulatorEngine:
         node.target_rpm = cmd_rpm if should_run else 0.0
 
         error = node.target_rpm - node.actual_rpm
-        response = clamp(error * 2.0, -220.0, 220.0)
+        response = clamp(error * 2.0, -4000.0, 4000.0)
         node.actual_rpm += response * dt
         if not should_run and now >= node.test_spin_until:
             node.actual_rpm *= 0.90
             if abs(node.actual_rpm) < 0.05:
                 node.actual_rpm = 0.0
-        node.actual_rpm = clamp(node.actual_rpm, -1200.0, 1200.0)
+        node.actual_rpm = clamp(node.actual_rpm, -10000.0, 10000.0)
         node.pos_rev = wrap_rev(node.pos_rev + (node.actual_rpm / 60.0) * dt)
 
         node.warning_flags = 0
@@ -710,14 +714,14 @@ class MotorSimulatorEngine:
         status_flags = set_or_clear(status_flags, ST_FAULT_ACTIVE, node.fault_flags != 0)
         status_flags = set_or_clear(status_flags, ST_CAN_TIMEOUT, can_timeout)
 
-        rpm_x10 = int(round(node.actual_rpm * 10.0))
+        rpm_u16 = int(round(clamp(node.actual_rpm, 0.0, 65535.0)))
         pos_u16 = int(wrap_rev(node.pos_rev) * 65535.0) & 0xFFFF
         pos_err = wrap_pos_error(g.sync_pos_u16, pos_u16)
         sync_err = int(clamp(pos_err / 256.0, -128.0, 127.0)) & 0xFF
         data = [
             status_flags & 0xFF,
             node.error_code & 0xFF,
-            *le_i16(rpm_x10),
+            *le_u16(rpm_u16),
             *le_u16(pos_u16),
             node.alive_counter & 0xFF,
             sync_err,
@@ -880,7 +884,7 @@ class MotorSimulatorWindow(QMainWindow):
         self.status_check.setChecked(True)
         self.status_check.toggled.connect(lambda v: setattr(self.engine, "publish_status", v))
         self.diag_check = QCheckBox("Diag TX")
-        self.diag_check.setChecked(False)
+        self.diag_check.setChecked(True)
         self.diag_check.toggled.connect(self.on_diag_toggle)
         self.presence_check = QCheckBox("Presence TX")
         self.presence_check.setChecked(False)
@@ -895,6 +899,7 @@ class MotorSimulatorWindow(QMainWindow):
         layout.addWidget(self.status_check)
         layout.addWidget(self.diag_check)
         layout.addWidget(self.presence_check)
+        self.engine.publish_diag = self.diag_check.isChecked()
         for sensor in range(SENSOR_TAB_COUNT):
             check = QCheckBox(f"S{sensor}")
             check.setChecked(True)
@@ -1035,8 +1040,7 @@ class MotorSimulatorWindow(QMainWindow):
         self.statusBar().showMessage("Simulation stopped")
 
     def on_diag_toggle(self, enabled: bool) -> None:
-        self.engine.manual_diag_override = enabled
-        self.engine.publish_diag = enabled
+        self.engine.allow_diag_tx = enabled
 
     def send_discover(self) -> None:
         self.engine.send_msg(SERVICE_ID_DISCOVER, [1, 10, 1, 1, 0, 0, 0, 0])
@@ -1079,7 +1083,7 @@ class MotorSimulatorWindow(QMainWindow):
             enabled = snap["sensor_enabled"].get(sensor, True)
             labels["mode"].setText(f"{g.system_mode} ({MODE_NAMES.get(g.system_mode, '?')})")
             labels["flags"].setText(f"0x{g.control_flags:02X}")
-            labels["base_rpm"].setText(f"{g.base_rpm_x10 / 10.0:.1f}")
+            labels["base_rpm"].setText(f"{float(g.base_rpm_u16):.1f}")
             labels["sync_pos"].setText(f"{g.sync_pos_u16 / 65535.0:.4f}")
             labels["sequence"].setText(str(g.sequence))
             labels["last_rx"].setText("Disabled" if not enabled else ("-" if not g.valid else f"{max(0.0, now - g.last_rx):.2f}s"))

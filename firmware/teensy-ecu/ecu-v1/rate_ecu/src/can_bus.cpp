@@ -13,6 +13,14 @@ static constexpr bool CAN_RX_DEBUG = false;
 static constexpr bool CAN_SERVICE_DEBUG = true;
 static constexpr bool CAN_TX_WARNINGS = true;
 
+static uint16_t clampBaseRpmU16(float rpm) {
+    if (rpm > cfg::RPM_MAX) rpm = cfg::RPM_MAX;
+    if (rpm < 0.0f) rpm = 0.0f;
+    const int32_t scaled = static_cast<int32_t>(rpm + 0.5f);
+    if (scaled > 65535) return 65535;
+    return static_cast<uint16_t>(scaled);
+}
+
 bool CanBus::begin() {
     Serial.print("CAN init start, baud=");
     Serial.println(cfg::CAN_BAUDRATE);
@@ -132,7 +140,7 @@ void CanBus::handleFrame(const CAN_message_t& msg, NodeManager* nodeManagers, ui
             NodeStatusFastFrame frame{};
             frame.status_flags       = msg.buf[0];
             frame.error_code         = msg.buf[1];
-            frame.actual_rpm_x10     = static_cast<int16_t>(msg.buf[2] | (msg.buf[3] << 8));
+            frame.actual_rpm_u16     = static_cast<uint16_t>(msg.buf[2] | (msg.buf[3] << 8));
             frame.actual_pos_u16     = static_cast<uint16_t>(msg.buf[4] | (msg.buf[5] << 8));
             frame.alive_counter      = msg.buf[6];
             frame.sync_error_x256rev = static_cast<int8_t>(msg.buf[7]);
@@ -147,7 +155,7 @@ void CanBus::handleFrame(const CAN_message_t& msg, NodeManager* nodeManagers, ui
                 Serial.print(" node=");
                 Serial.print(nodeId);
                 Serial.print(" rpm=");
-                Serial.print(frame.actual_rpm_x10 / 10.0f);
+                Serial.print(frame.actual_rpm_u16);
                 Serial.print(" pos=");
                 Serial.print(frame.actual_pos_u16);
                 Serial.print(" alive=");
@@ -223,7 +231,7 @@ void CanBus::sendGlobalControl(uint8_t channelIndex, const EcuState& ecu, const 
     GlobalControlFrame frame{};
     frame.system_mode   = static_cast<uint8_t>(ecu.mode());
     frame.control_flags = ecu.flags();
-    frame.base_rpm_x10  = static_cast<int16_t>(ecu.baseRpm() * 10.0f);
+    frame.base_rpm_u16  = clampBaseRpmU16(ecu.baseRpm());
     frame.sync_pos_u16  = syncAxis.posU16();
     frame.sequence      = sequence_[channelIndex]++;
     frame.reserved      = 0;
@@ -233,8 +241,8 @@ void CanBus::sendGlobalControl(uint8_t channelIndex, const EcuState& ecu, const 
     msg.len = 8;
     msg.buf[0] = frame.system_mode;
     msg.buf[1] = frame.control_flags;
-    msg.buf[2] = static_cast<uint8_t>(frame.base_rpm_x10 & 0xFF);
-    msg.buf[3] = static_cast<uint8_t>((frame.base_rpm_x10 >> 8) & 0xFF);
+    msg.buf[2] = static_cast<uint8_t>(frame.base_rpm_u16 & 0xFF);
+    msg.buf[3] = static_cast<uint8_t>((frame.base_rpm_u16 >> 8) & 0xFF);
     msg.buf[4] = static_cast<uint8_t>(frame.sync_pos_u16 & 0xFF);
     msg.buf[5] = static_cast<uint8_t>((frame.sync_pos_u16 >> 8) & 0xFF);
     msg.buf[6] = frame.sequence;
@@ -253,8 +261,8 @@ void CanBus::sendGlobalControl(uint8_t channelIndex, const EcuState& ecu, const 
         Serial.print(frame.system_mode);
         Serial.print(" flags=");
         Serial.print(frame.control_flags);
-        Serial.print(" rpm_x10=");
-        Serial.print(frame.base_rpm_x10);
+        Serial.print(" rpm=");
+        Serial.print(frame.base_rpm_u16);
         Serial.print(" sync=");
         Serial.print(frame.sync_pos_u16);
         Serial.print(" seq=");

@@ -230,11 +230,6 @@ class EcuServiceTool(QMainWindow):
         drive_box = QGroupBox("Drive Config")
         drive_form = QFormLayout(drive_box)
 
-        self.gear_ratio_spin = QDoubleSpinBox()
-        self.gear_ratio_spin.setDecimals(2)
-        self.gear_ratio_spin.setRange(0.01, 100.0)
-        self.gear_ratio_spin.setValue(2.0)
-
         self.trim_limit_spin = QDoubleSpinBox()
         self.trim_limit_spin.setDecimals(1)
         self.trim_limit_spin.setRange(0.1, 1000.0)
@@ -245,7 +240,6 @@ class EcuServiceTool(QMainWindow):
         self.position_kp_spin.setRange(0.001, 10.0)
         self.position_kp_spin.setValue(0.5)
 
-        drive_form.addRow("Gear Ratio", self.gear_ratio_spin)
         drive_form.addRow("Trim Limit RPM", self.trim_limit_spin)
         drive_form.addRow("Position Kp", self.position_kp_spin)
 
@@ -257,6 +251,35 @@ class EcuServiceTool(QMainWindow):
         drive_buttons.addWidget(btn_get_drive)
         drive_buttons.addWidget(btn_set_drive)
         drive_form.addRow(drive_buttons)
+
+        channel_box = QGroupBox("Channel Ratio Config")
+        channel_form = QFormLayout(channel_box)
+
+        self.channel_cfg_spin = QSpinBox()
+        self.channel_cfg_spin.setRange(0, 3)
+
+        self.channel_drive_ratio_spin = QDoubleSpinBox()
+        self.channel_drive_ratio_spin.setDecimals(2)
+        self.channel_drive_ratio_spin.setRange(0.01, 100.0)
+        self.channel_drive_ratio_spin.setValue(1.0)
+
+        self.channel_motor_ratio_spin = QDoubleSpinBox()
+        self.channel_motor_ratio_spin.setDecimals(2)
+        self.channel_motor_ratio_spin.setRange(0.01, 100.0)
+        self.channel_motor_ratio_spin.setValue(2.0)
+
+        channel_form.addRow("Sensor Channel", self.channel_cfg_spin)
+        channel_form.addRow("Drive Ratio", self.channel_drive_ratio_spin)
+        channel_form.addRow("Motor Ratio", self.channel_motor_ratio_spin)
+
+        channel_buttons = QHBoxLayout()
+        btn_get_channel = QPushButton("Get")
+        btn_get_channel.clicked.connect(lambda: self.send_cfg_get(Block.CHANNEL, self.channel_cfg_spin.value()))
+        btn_set_channel = QPushButton("Set")
+        btn_set_channel.clicked.connect(self.send_channel_config)
+        channel_buttons.addWidget(btn_get_channel)
+        channel_buttons.addWidget(btn_set_channel)
+        channel_form.addRow(channel_buttons)
 
         diag_box = QGroupBox("Diag Config")
         diag_form = QFormLayout(diag_box)
@@ -320,9 +343,10 @@ class EcuServiceTool(QMainWindow):
 
         grid.addWidget(machine_box, 0, 0)
         grid.addWidget(drive_box, 0, 1)
-        grid.addWidget(diag_box, 1, 0)
-        grid.addWidget(network_box, 1, 1)
-        grid.addWidget(persist_box, 2, 0, 1, 2)
+        grid.addWidget(channel_box, 1, 0)
+        grid.addWidget(diag_box, 1, 1)
+        grid.addWidget(network_box, 2, 0)
+        grid.addWidget(persist_box, 2, 1)
         return page
 
     def build_diag_tab(self) -> QWidget:
@@ -348,6 +372,13 @@ class EcuServiceTool(QMainWindow):
         self.diag_period_ctrl_spin.setValue(200)
         self.diag_detail_ctrl_combo = QComboBox()
         self.diag_detail_ctrl_combo.addItems(["Basic", "Extended"])
+        self.diag_ctrl_enable.toggled.connect(self.send_diag_control)
+        self.diag_ctrl_stream.toggled.connect(self.send_diag_control)
+        for check in self.diag_sensor_checks:
+            check.toggled.connect(self.send_diag_control)
+        self.diag_node_mask_edit.editingFinished.connect(self.send_diag_control)
+        self.diag_period_ctrl_spin.valueChanged.connect(self.send_diag_control)
+        self.diag_detail_ctrl_combo.currentIndexChanged.connect(self.send_diag_control)
         self.detail_sensor_spin = QSpinBox()
         self.detail_sensor_spin.setRange(0, 3)
         self.detail_node_spin = QSpinBox()
@@ -531,15 +562,24 @@ class EcuServiceTool(QMainWindow):
         payload = bytearray(8)
         payload[0] = Block.DRIVE
         payload[1] = 0
-        gear_x100 = int(round(self.gear_ratio_spin.value() * 100.0))
         trim_x10 = int(round(self.trim_limit_spin.value() * 10.0))
         kp_x1000 = int(round(self.position_kp_spin.value() * 1000.0))
-        payload[2] = gear_x100 & 0xFF
-        payload[3] = (gear_x100 >> 8) & 0xFF
-        payload[4] = trim_x10 & 0xFF
-        payload[5] = (trim_x10 >> 8) & 0xFF
-        payload[6] = kp_x1000 & 0xFF
-        payload[7] = (kp_x1000 >> 8) & 0xFF
+        payload[2] = trim_x10 & 0xFF
+        payload[3] = (trim_x10 >> 8) & 0xFF
+        payload[4] = kp_x1000 & 0xFF
+        payload[5] = (kp_x1000 >> 8) & 0xFF
+        self.send_packet(Pgn.ECU_CFG_SET, bytes(payload))
+
+    def send_channel_config(self) -> None:
+        payload = bytearray(8)
+        payload[0] = Block.CHANNEL
+        payload[1] = self.channel_cfg_spin.value()
+        drive_x100 = int(round(self.channel_drive_ratio_spin.value() * 100.0))
+        motor_x100 = int(round(self.channel_motor_ratio_spin.value() * 100.0))
+        payload[2] = drive_x100 & 0xFF
+        payload[3] = (drive_x100 >> 8) & 0xFF
+        payload[4] = motor_x100 & 0xFF
+        payload[5] = (motor_x100 >> 8) & 0xFF
         self.send_packet(Pgn.ECU_CFG_SET, bytes(payload))
 
     def send_diag_config(self) -> None:
@@ -601,9 +641,12 @@ class EcuServiceTool(QMainWindow):
         self.send_cfg_get(Block.DRIVE, 0)
         self.send_cfg_get(Block.DIAG, 0)
         self.send_cfg_get(Block.NETWORK, 0)
+        for sensor_index in range(4):
+            self.send_cfg_get(Block.CHANNEL, sensor_index)
         self.send_diag_control()
 
     def request_node_details(self) -> None:
+        self.send_diag_control()
         self._send_node_detail_request(self.detail_sensor_spin.value(), self.detail_node_spin.value())
 
     def _selected_sensor_list(self) -> list[int]:
@@ -612,18 +655,23 @@ class EcuServiceTool(QMainWindow):
             sensors = [self.detail_sensor_spin.value()]
         return sensors
 
+    def _configured_row_count(self) -> int:
+        return max(1, min(16, self.row_count_spin.value()))
+
     def _selected_node_list(self) -> list[int]:
         try:
             node_mask = int(self.diag_node_mask_edit.text().strip(), 16) & 0xFFFF
         except ValueError:
             node_mask = 0
 
-        nodes = [node_id for node_id in range(1, 17) if node_mask & (1 << (node_id - 1))]
+        max_node = self._configured_row_count()
+        nodes = [node_id for node_id in range(1, max_node + 1) if node_mask & (1 << (node_id - 1))]
         if not nodes:
-            nodes = [self.detail_node_spin.value()]
+            nodes = [min(self.detail_node_spin.value(), max_node)]
         return nodes
 
     def _send_node_detail_request(self, sensor: int, node_id: int) -> None:
+        node_id = max(1, min(node_id, self._configured_row_count()))
         sensor_mask = 1 << sensor
         node_mask = 1 << (node_id - 1)
         payload = bytes([
@@ -664,6 +712,7 @@ class EcuServiceTool(QMainWindow):
 
         self.detail_sensor_spin.setValue(self.auto_detail_sensor)
         self.detail_node_spin.setValue(self.auto_detail_node)
+        self.send_diag_control()
         self._send_node_detail_request(self.auto_detail_sensor, self.auto_detail_node)
 
         sensor_idx = sensors.index(self.auto_detail_sensor)
@@ -821,13 +870,15 @@ class EcuServiceTool(QMainWindow):
         if block == Block.MACHINE:
             self.active_sensor_spin.setValue(payload[2])
             self.row_count_spin.setValue(payload[3])
+            self.detail_node_spin.setMaximum(max(1, payload[3]))
+            if self.detail_node_spin.value() > payload[3]:
+                self.detail_node_spin.setValue(max(1, payload[3]))
             self.holes_spin.setValue(parse_u16(payload[4], payload[5]))
             self.upm_scale_spin.setValue(parse_u16(payload[6], payload[7]) / 10.0)
             self.log_line("RX CFG_STATUS MACHINE")
         elif block == Block.DRIVE:
-            self.gear_ratio_spin.setValue(parse_u16(payload[2], payload[3]) / 100.0)
-            self.trim_limit_spin.setValue(parse_i16(payload[4], payload[5]) / 10.0)
-            self.position_kp_spin.setValue(parse_u16(payload[6], payload[7]) / 1000.0)
+            self.trim_limit_spin.setValue(parse_i16(payload[2], payload[3]) / 10.0)
+            self.position_kp_spin.setValue(parse_u16(payload[4], payload[5]) / 1000.0)
             self.log_line("RX CFG_STATUS DRIVE")
         elif block == Block.DIAG:
             self.diag_enable_check.setChecked(payload[2] != 0)
@@ -840,7 +891,13 @@ class EcuServiceTool(QMainWindow):
             self.module_id_spin.setValue(payload[3])
             self.log_line("RX CFG_STATUS NETWORK")
         elif block == Block.CHANNEL:
-            self.log_line(f"RX CFG_STATUS CHANNEL index={index} enabled={payload[2]} profile={payload[3]}")
+            self.channel_cfg_spin.setValue(index)
+            self.channel_drive_ratio_spin.setValue(parse_u16(payload[2], payload[3]) / 100.0)
+            self.channel_motor_ratio_spin.setValue(parse_u16(payload[4], payload[5]) / 100.0)
+            self.log_line(
+                f"RX CFG_STATUS CHANNEL index={index} drive={self.channel_drive_ratio_spin.value():.2f} "
+                f"motor={self.channel_motor_ratio_spin.value():.2f}"
+            )
         else:
             self.log_line(f"RX CFG_STATUS block={block} payload={payload.hex(' ')}")
 
@@ -855,7 +912,7 @@ class EcuServiceTool(QMainWindow):
             return
         diag = self.sensor_diags[sensor]
         diag.mode = payload[1]
-        diag.base_rpm = parse_i16(payload[2], payload[3]) / 10.0
+        diag.base_rpm = parse_u16(payload[2], payload[3])
         diag.target_upm = parse_u32(payload[4:8]) / 1000.0
         self.refresh_sensor_row(sensor)
         self.log_line(f"RX ECU_DIAG_SENSOR s{sensor} base={diag.base_rpm:.1f} target={diag.target_upm:.3f}")
@@ -866,8 +923,8 @@ class EcuServiceTool(QMainWindow):
             return
         diag = self.sensor_diags[sensor]
         diag.online_nodes = payload[1]
-        diag.avg_rpm = parse_i16(payload[2], payload[3]) / 10.0
-        diag.total_rpm = parse_i16(payload[4], payload[5]) / 10.0
+        diag.avg_rpm = parse_u16(payload[2], payload[3])
+        diag.total_rpm = parse_u16(payload[4], payload[5])
         diag.avg_pos = parse_u16(payload[6], payload[7])
         self.refresh_sensor_row(sensor)
         self.log_line(f"RX ECU_DIAG_NODE_SUMMARY s{sensor} online={diag.online_nodes} total={diag.total_rpm:.1f}")
@@ -879,7 +936,7 @@ class EcuServiceTool(QMainWindow):
         diag = self.node_diags.get(key, NodeDiag(sensor=sensor, node_id=node_id))
         diag.status_flags = payload[2]
         diag.error_code = payload[3]
-        diag.actual_rpm = parse_i16(payload[4], payload[5]) / 10.0
+        diag.actual_rpm = parse_u16(payload[4], payload[5])
         diag.actual_pos = parse_u16(payload[6], payload[7])
         self.node_diags[key] = diag
         self.refresh_node_table()

@@ -30,7 +30,7 @@ void setup() {
 
     for (uint8_t sensorIndex = 0; sensorIndex < cfg::MAX_SENSOR_CHANNELS; ++sensorIndex) {
         ecus[sensorIndex].begin();
-        runtime_cfg::applyToEcu(ecus[sensorIndex]);
+        runtime_cfg::applyToEcu(ecus[sensorIndex], sensorIndex);
         syncAxes[sensorIndex].begin();
         nodeManagers[sensorIndex].begin();
     }
@@ -98,7 +98,7 @@ void loop() {
                 totalActualRpm,
                 ecus[sensorIndex].upmScale(),
                 ecus[sensorIndex].holesPerRev(),
-                ecus[sensorIndex].gearRatio()
+                ecus[sensorIndex].combinedRatio()
             );
             Serial.print("s");
             Serial.print(sensorIndex);

@@ -15,7 +15,8 @@ void EcuState::begin() {
     relay_hi_ = 0;
     section_mask_ = static_cast<uint16_t>(cfg::sectionMaskLimit());
     holes_per_rev_ = cfg::DEFAULT_HOLES_PER_REV;
-    gear_ratio_ = cfg::DEFAULT_GEAR_RATIO;
+    drive_ratio_ = cfg::DEFAULT_DRIVE_RATIO;
+    motor_ratio_ = cfg::DEFAULT_MOTOR_RATIO;
     upm_scale_ = cfg::DEFAULT_UPM_SCALE;
     kp_ = 0.0f;
     ki_ = 0.0f;
@@ -101,10 +102,17 @@ void EcuState::setHolesPerRev(uint16_t holes) {
 }
 uint16_t EcuState::holesPerRev() const { return holes_per_rev_; }
 
-void EcuState::setGearRatio(float ratio) {
-    gear_ratio_ = (ratio <= 0.0f) ? cfg::DEFAULT_GEAR_RATIO : ratio;
+void EcuState::setDriveRatio(float ratio) {
+    drive_ratio_ = (ratio <= 0.0f) ? cfg::DEFAULT_DRIVE_RATIO : ratio;
 }
-float EcuState::gearRatio() const { return gear_ratio_; }
+float EcuState::driveRatio() const { return drive_ratio_; }
+
+void EcuState::setMotorRatio(float ratio) {
+    motor_ratio_ = (ratio <= 0.0f) ? cfg::DEFAULT_MOTOR_RATIO : ratio;
+}
+float EcuState::motorRatio() const { return motor_ratio_; }
+
+float EcuState::combinedRatio() const { return drive_ratio_ * motor_ratio_; }
 
 void EcuState::setUpmScale(float scale) {
     upm_scale_ = (scale <= 0.0f) ? cfg::DEFAULT_UPM_SCALE : scale;

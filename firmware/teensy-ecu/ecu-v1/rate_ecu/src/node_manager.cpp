@@ -28,7 +28,7 @@ void NodeManager::onStatusFrame(uint8_t nodeId, const NodeStatusFastFrame& frame
     n.last_seen_ms = millis();
     n.status_flags = frame.status_flags;
     n.error_code = frame.error_code;
-    n.actual_rpm = frame.actual_rpm_x10 / 10.0f;
+    n.actual_rpm = static_cast<float>(frame.actual_rpm_u16);
     n.actual_pos = frame.actual_pos_u16;
     n.alive_counter = frame.alive_counter;
     n.sync_error = frame.sync_error_x256rev;

@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 
+#include "config.h"
+
 class EcuState;
 
 namespace runtime_cfg {
@@ -12,7 +14,8 @@ struct PersistentConfig {
     uint8_t configured_row_count;
     uint16_t holes_per_rev;
     uint16_t upm_scale_x10;
-    uint16_t gear_ratio_x100;
+    uint16_t drive_ratio_x100[cfg::MAX_SENSOR_CHANNELS];
+    uint16_t motor_ratio_x100[cfg::MAX_SENSOR_CHANNELS];
     int16_t trim_limit_rpm_x10;
     uint16_t position_kp_x1000;
     uint8_t diag_enable;
@@ -40,8 +43,11 @@ void setHolesPerRev(uint16_t holes);
 float upmScale();
 void setUpmScale(float scale);
 
-float gearRatio();
-void setGearRatio(float ratio);
+float driveRatio(uint8_t sensor_index);
+void setDriveRatio(uint8_t sensor_index, float ratio);
+
+float motorRatio(uint8_t sensor_index);
+void setMotorRatio(uint8_t sensor_index, float ratio);
 
 float trimRpmLimit();
 void setTrimRpmLimit(float rpm);
@@ -67,7 +73,7 @@ void setIpLastOctet(uint8_t octet);
 uint8_t moduleId();
 void setModuleId(uint8_t module_id);
 
-void applyToEcu(EcuState& ecu);
+void applyToEcu(EcuState& ecu, uint8_t sensor_index);
 void applyToEcus(EcuState* ecus, uint8_t max_count);
 
 } // namespace runtime_cfg

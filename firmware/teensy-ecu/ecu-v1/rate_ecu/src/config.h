@@ -10,7 +10,8 @@ static constexpr uint32_t NODE_COMMAND_HZ = 20;
 
 // limits
 static constexpr float RPM_MIN = 0.0f;
-static constexpr float RPM_MAX = 1000.0f;
+// GLOBAL_CONTROL.base_rpm is now encoded as uint16 with 1 rpm resolution.
+static constexpr float RPM_MAX = 10000.0f;
 
 // geometry / machine defaults
 static constexpr uint8_t MAX_SENSOR_CHANNELS = 4;           // compiled-in capacity
@@ -19,7 +20,8 @@ static constexpr uint8_t PGN_SECTION_BIT_COUNT = 16;          // relay_lo + rela
 static constexpr uint8_t NODE_COUNT_MAX = 16;                // current CAN node range uses 0x101..0x110
 static constexpr uint8_t DEFAULT_CONFIGURED_ROW_COUNT = 6;   // rows/sections configured in the machine
 static constexpr uint16_t DEFAULT_HOLES_PER_REV = 26;
-static constexpr float DEFAULT_GEAR_RATIO = 2.0f;          // motor rpm / disc rpm
+static constexpr float DEFAULT_DRIVE_RATIO = 1.0f;         // disc-side drivetrain multiplier
+static constexpr float DEFAULT_MOTOR_RATIO = 2.0f;         // motor rpm / disc rpm after drivetrain
 static constexpr float DEFAULT_UPM_SCALE = 100.0f;         // ECU-side scaling for AOG target_upm
 
 // sync
@@ -92,7 +94,7 @@ enum NodeCommandFlags : uint8_t {
 struct GlobalControlFrame {
     uint8_t system_mode;
     uint8_t control_flags;
-    int16_t base_rpm_x10;
+    uint16_t base_rpm_u16;
     uint16_t sync_pos_u16;
     uint8_t sequence;
     uint8_t reserved;
@@ -110,7 +112,7 @@ struct NodeCommandFrame {
 struct NodeStatusFastFrame {
     uint8_t status_flags;
     uint8_t error_code;
-    int16_t actual_rpm_x10;
+    uint16_t actual_rpm_u16;
     uint16_t actual_pos_u16;
     uint8_t alive_counter;
     int8_t sync_error_x256rev;

@@ -42,8 +42,11 @@ public:
 
     void setHolesPerRev(uint16_t holes);
     uint16_t holesPerRev() const;
-    void setGearRatio(float ratio);
-    float gearRatio() const;
+    void setDriveRatio(float ratio);
+    float driveRatio() const;
+    void setMotorRatio(float ratio);
+    float motorRatio() const;
+    float combinedRatio() const;
     void setUpmScale(float scale);
     float upmScale() const;
 
@@ -74,7 +77,8 @@ private:
     uint8_t relay_hi_ = 0;
     uint16_t section_mask_ = static_cast<uint16_t>(cfg::sectionMaskLimit());
     uint16_t holes_per_rev_ = cfg::DEFAULT_HOLES_PER_REV;
-    float gear_ratio_ = cfg::DEFAULT_GEAR_RATIO;
+    float drive_ratio_ = cfg::DEFAULT_DRIVE_RATIO;
+    float motor_ratio_ = cfg::DEFAULT_MOTOR_RATIO;
     float upm_scale_ = cfg::DEFAULT_UPM_SCALE;
 
     float kp_ = 0.0f;

@@ -7,7 +7,7 @@
 
 namespace {
 
-constexpr uint16_t CONFIG_VERSION = 0x0101;
+constexpr uint16_t CONFIG_VERSION = 0x0102;
 constexpr int EEPROM_ADDR = 0;
 
 runtime_cfg::PersistentConfig g_config{};
@@ -41,8 +41,15 @@ void clampConfig(runtime_cfg::PersistentConfig& config) {
         config.upm_scale_x10 = static_cast<uint16_t>(cfg::DEFAULT_UPM_SCALE * 10.0f);
     }
 
-    if (config.gear_ratio_x100 == 0) {
-        config.gear_ratio_x100 = static_cast<uint16_t>(cfg::DEFAULT_GEAR_RATIO * 100.0f);
+    for (uint8_t sensorIndex = 0; sensorIndex < cfg::MAX_SENSOR_CHANNELS; ++sensorIndex) {
+        if (config.drive_ratio_x100[sensorIndex] == 0) {
+            config.drive_ratio_x100[sensorIndex] =
+                static_cast<uint16_t>(cfg::DEFAULT_DRIVE_RATIO * 100.0f);
+        }
+        if (config.motor_ratio_x100[sensorIndex] == 0) {
+            config.motor_ratio_x100[sensorIndex] =
+                static_cast<uint16_t>(cfg::DEFAULT_MOTOR_RATIO * 100.0f);
+        }
     }
 
     if (config.trim_limit_rpm_x10 <= 0) {
@@ -68,7 +75,12 @@ void setDefaults(runtime_cfg::PersistentConfig& config) {
     config.configured_row_count = cfg::DEFAULT_CONFIGURED_ROW_COUNT;
     config.holes_per_rev = cfg::DEFAULT_HOLES_PER_REV;
     config.upm_scale_x10 = static_cast<uint16_t>(cfg::DEFAULT_UPM_SCALE * 10.0f);
-    config.gear_ratio_x100 = static_cast<uint16_t>(cfg::DEFAULT_GEAR_RATIO * 100.0f);
+    for (uint8_t sensorIndex = 0; sensorIndex < cfg::MAX_SENSOR_CHANNELS; ++sensorIndex) {
+        config.drive_ratio_x100[sensorIndex] =
+            static_cast<uint16_t>(cfg::DEFAULT_DRIVE_RATIO * 100.0f);
+        config.motor_ratio_x100[sensorIndex] =
+            static_cast<uint16_t>(cfg::DEFAULT_MOTOR_RATIO * 100.0f);
+    }
     config.trim_limit_rpm_x10 = static_cast<int16_t>(cfg::TRIM_RPM_LIMIT * 10.0f);
     config.position_kp_x1000 = static_cast<uint16_t>(cfg::POSITION_KP * 1000.0f);
     config.diag_enable = 0;
@@ -140,9 +152,29 @@ void setUpmScale(float scale) {
     clampConfig(g_config);
 }
 
-float gearRatio() { return g_config.gear_ratio_x100 / 100.0f; }
-void setGearRatio(float ratio) {
-    g_config.gear_ratio_x100 = (ratio <= 0.0f) ? 0 : static_cast<uint16_t>(ratio * 100.0f);
+float driveRatio(uint8_t sensor_index) {
+    if (sensor_index >= cfg::MAX_SENSOR_CHANNELS) {
+        sensor_index = 0;
+    }
+    return g_config.drive_ratio_x100[sensor_index] / 100.0f;
+}
+void setDriveRatio(uint8_t sensor_index, float ratio) {
+    if (sensor_index >= cfg::MAX_SENSOR_CHANNELS) return;
+    g_config.drive_ratio_x100[sensor_index] =
+        (ratio <= 0.0f) ? 0 : static_cast<uint16_t>(ratio * 100.0f);
+    clampConfig(g_config);
+}
+
+float motorRatio(uint8_t sensor_index) {
+    if (sensor_index >= cfg::MAX_SENSOR_CHANNELS) {
+        sensor_index = 0;
+    }
+    return g_config.motor_ratio_x100[sensor_index] / 100.0f;
+}
+void setMotorRatio(uint8_t sensor_index, float ratio) {
+    if (sensor_index >= cfg::MAX_SENSOR_CHANNELS) return;
+    g_config.motor_ratio_x100[sensor_index] =
+        (ratio <= 0.0f) ? 0 : static_cast<uint16_t>(ratio * 100.0f);
     clampConfig(g_config);
 }
 
@@ -183,9 +215,10 @@ void setIpLastOctet(uint8_t octet) {
 uint8_t moduleId() { return g_config.module_id; }
 void setModuleId(uint8_t module_id) { g_config.module_id = module_id; }
 
-void applyToEcu(EcuState& ecu) {
+void applyToEcu(EcuState& ecu, uint8_t sensor_index) {
     ecu.setHolesPerRev(holesPerRev());
-    ecu.setGearRatio(gearRatio());
+    ecu.setDriveRatio(driveRatio(sensor_index));
+    ecu.setMotorRatio(motorRatio(sensor_index));
     ecu.setUpmScale(upmScale());
     ecu.setDiag(diagEnabled());
 }
@@ -193,7 +226,7 @@ void applyToEcu(EcuState& ecu) {
 void applyToEcus(EcuState* ecus, uint8_t max_count) {
     if (ecus == nullptr) return;
     for (uint8_t i = 0; i < max_count; ++i) {
-        applyToEcu(ecus[i]);
+        applyToEcu(ecus[i], i);
     }
 }
 
