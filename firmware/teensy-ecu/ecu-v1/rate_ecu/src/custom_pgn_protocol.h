@@ -41,7 +41,9 @@ enum : uint8_t {
     CFG_BLOCK_DRIVE   = 1,
     CFG_BLOCK_DIAG    = 2,
     CFG_BLOCK_CHANNEL = 3,
-    CFG_BLOCK_NETWORK = 4
+    CFG_BLOCK_NETWORK = 4,
+    CFG_BLOCK_MONITOR = 5,
+    CFG_BLOCK_PLANTER = CFG_BLOCK_MONITOR
 };
 
 inline uint8_t crc(const uint8_t* data, size_t len_without_crc) {

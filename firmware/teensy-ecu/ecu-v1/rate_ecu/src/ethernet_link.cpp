@@ -2,9 +2,11 @@
 
 #include <string.h>
 
+#include "blockage_output.h"
 #include "config.h"
 #include "custom_pgn_protocol.h"
 #include "legacy_rate_protocol.h"
+#include "planter_output.h"
 #include "rate_math.h"
 #include "runtime_config.h"
 
@@ -12,6 +14,7 @@ namespace {
 constexpr uint32_t RC_TIMEOUT_WARN_MS = 1000;
 constexpr uint32_t RC_TIMEOUT_HARD_MS = 3000;
 constexpr uint32_t STATUS_TX_MS  = 200;
+constexpr uint32_t MONITOR_CONFIG_TX_MS = 1000;
 
 constexpr uint8_t DEFAULT_IP0 = 192;
 constexpr uint8_t DEFAULT_IP1 = 168;
@@ -168,6 +171,31 @@ bool EthernetLink::processUdpPacket(EcuState* ecus,
                     runtime_cfg::setDriveRatio(index, static_cast<float>(data[4] | (data[5] << 8)) / 100.0f);
                     runtime_cfg::setMotorRatio(index, static_cast<float>(data[6] | (data[7] << 8)) / 100.0f);
                     applyRuntimeConfigToEcus(ecus);
+                    break;
+
+                case custom_pgn::CFG_BLOCK_MONITOR:
+                    if (index == 0) {
+                        runtime_cfg::setMonitorOutputEnabled(data[4] != 0);
+                        runtime_cfg::setMonitorOutputMode(data[5]);
+                        runtime_cfg::setMonitorRows(data[6]);
+                        runtime_cfg::setBlockageRowsPerModule(data[7]);
+                    } else if (index == 1) {
+                        runtime_cfg::setPlanterRowWidthCm(
+                            static_cast<float>(static_cast<uint16_t>(data[4] | (data[5] << 8))) / 10.0f
+                        );
+                        runtime_cfg::setPlanterTargetPopulation(
+                            static_cast<uint32_t>(data[6]) |
+                            (static_cast<uint32_t>(data[7]) << 8) |
+                            (static_cast<uint32_t>(data[8]) << 16) |
+                            (static_cast<uint32_t>(data[9]) << 24)
+                        );
+                    } else if (index == 2) {
+                        runtime_cfg::setPlanterDoublesFactor(
+                            static_cast<float>(static_cast<uint16_t>(data[4] | (data[5] << 8))) / 100.0f
+                        );
+                        runtime_cfg::setPlanterMetric(data[6] != 0);
+                        runtime_cfg::setBlockageThreshold(data[7]);
+                    }
                     break;
 
                 default:
@@ -608,6 +636,32 @@ void EthernetLink::sendConfigStatus(uint8_t block_id, uint8_t index, const EcuSt
             payload[5] = module_id_;
             break;
 
+        case custom_pgn::CFG_BLOCK_MONITOR:
+            if (index == 0) {
+                payload[2] = runtime_cfg::monitorOutputEnabled() ? 1 : 0;
+                payload[3] = runtime_cfg::monitorOutputMode();
+                payload[4] = runtime_cfg::monitorRows();
+                payload[5] = runtime_cfg::blockageRowsPerModule();
+            } else if (index == 1) {
+                const uint16_t row_width_x10 =
+                    static_cast<uint16_t>(runtime_cfg::planterRowWidthCm() * 10.0f);
+                const uint32_t target_population = runtime_cfg::planterTargetPopulation();
+                payload[2] = static_cast<uint8_t>(row_width_x10 & 0xFF);
+                payload[3] = static_cast<uint8_t>((row_width_x10 >> 8) & 0xFF);
+                payload[4] = static_cast<uint8_t>(target_population & 0xFF);
+                payload[5] = static_cast<uint8_t>((target_population >> 8) & 0xFF);
+                payload[6] = static_cast<uint8_t>((target_population >> 16) & 0xFF);
+                payload[7] = static_cast<uint8_t>((target_population >> 24) & 0xFF);
+            } else if (index == 2) {
+                const uint16_t doubles_x100 =
+                    static_cast<uint16_t>(runtime_cfg::planterDoublesFactor() * 100.0f);
+                payload[2] = static_cast<uint8_t>(doubles_x100 & 0xFF);
+                payload[3] = static_cast<uint8_t>((doubles_x100 >> 8) & 0xFF);
+                payload[4] = runtime_cfg::planterMetric() ? 1 : 0;
+                payload[5] = runtime_cfg::blockageThreshold();
+            }
+            break;
+
         default:
             break;
     }
@@ -648,9 +702,11 @@ void EthernetLink::sendDiagSensor(uint8_t sensorIndex, const EcuState& ecu) {
     payload[0] = sensorIndex;
     payload[1] = static_cast<uint8_t>(ecu.mode());
 
-    const int16_t base_rpm_x10 = clampInt16(static_cast<int32_t>(ecu.baseRpm() * 10.0f));
-    payload[2] = static_cast<uint8_t>(base_rpm_x10 & 0xFF);
-    payload[3] = static_cast<uint8_t>((base_rpm_x10 >> 8) & 0xFF);
+    const uint16_t base_rpm_u16 = clampValue<uint32_t>(
+        static_cast<uint32_t>(ecu.baseRpm() + 0.5f), 0u, 65535u
+    );
+    payload[2] = static_cast<uint8_t>(base_rpm_u16 & 0xFF);
+    payload[3] = static_cast<uint8_t>((base_rpm_u16 >> 8) & 0xFF);
 
     const uint32_t target_upm_x1000 = static_cast<uint32_t>(ecu.rateSourceUpm() * 1000.0f);
     payload[4] = static_cast<uint8_t>(target_upm_x1000 & 0xFF);
@@ -729,6 +785,206 @@ void EthernetLink::sendDiagNodeDetails(const NodeManager* nodeManagers,
             sendDiagNodeDetailA(sensorIndex, nodeId, nodeState);
             sendDiagNodeDetailB(sensorIndex, nodeId, nodeState);
         }
+    }
+}
+
+void EthernetLink::sendMonitorPacket(uint16_t port, const uint8_t* data, size_t len) {
+    udp_.beginPacket(destination_ip_, port);
+    udp_.write(data, len);
+    udp_.endPacket();
+}
+
+void EthernetLink::sendPlanterOutput(const EcuState* ecus, const NodeManager* nodeManagers, uint8_t sensorCount) {
+    if (!runtime_cfg::monitorOutputEnabled() ||
+        runtime_cfg::monitorOutputMode() != static_cast<uint8_t>(MonitorOutputMode::PLANTER) ||
+        sensorCount == 0) {
+        return;
+    }
+
+    const uint8_t planterRows = clampValue<uint8_t>(
+        runtime_cfg::monitorRows(), 1u,
+        (runtime_cfg::configuredRowCount() < cfg::NODE_COUNT_MAX)
+            ? runtime_cfg::configuredRowCount()
+            : cfg::NODE_COUNT_MAX
+    );
+
+    const EcuState& ecu = ecus[0];
+    const NodeManager& nodeManager = nodeManagers[0];
+    uint32_t rowPopulation[cfg::NODE_COUNT_MAX]{};
+    uint16_t overrideMask = 0;
+    uint32_t populationSum = 0;
+    uint8_t activeRows = 0;
+
+    for (uint8_t nodeId = 1; nodeId <= planterRows; ++nodeId) {
+        const bool sectionEnabled = ecu.sectionEnabled(nodeId);
+        const NodeRuntimeState& nodeState = nodeManager.node(nodeId);
+        const float targetRpm = sectionEnabled ? ecu.baseRpm() : 0.0f;
+        rowPopulation[nodeId - 1] = planter_output::estimatePopulation(
+            runtime_cfg::planterTargetPopulation(),
+            targetRpm,
+            nodeState.actual_rpm
+        );
+
+        if (sectionEnabled) {
+            populationSum += rowPopulation[nodeId - 1];
+            ++activeRows;
+        } else {
+            overrideMask |= static_cast<uint16_t>(1u << (nodeId - 1u));
+        }
+    }
+
+    const uint32_t summaryPopulation = (activeRows > 0) ? (populationSum / activeRows) : 0u;
+
+    const uint32_t now = millis();
+    if (now - last_planter_cfg_tx_ms_ >= MONITOR_CONFIG_TX_MS) {
+        last_planter_cfg_tx_ms_ = now;
+        uint8_t payload[8]{};
+        uint8_t packet[14]{};
+        const uint16_t rowWidthX10 = static_cast<uint16_t>(runtime_cfg::planterRowWidthCm() * 10.0f);
+        const uint16_t targetPopulationD10 = static_cast<uint16_t>(
+            clampValue<uint32_t>(runtime_cfg::planterTargetPopulation() / 10u, 0u, 65535u)
+        );
+        const uint8_t doublesX100 = static_cast<uint8_t>(clampValue<uint32_t>(
+            static_cast<uint32_t>(runtime_cfg::planterDoublesFactor() * 100.0f + 0.5f), 0u, 255u
+        ));
+
+        payload[0] = planterRows;
+        payload[1] = 0;
+        payload[2] = static_cast<uint8_t>((rowWidthX10 >> 8) & 0xFF);
+        payload[3] = static_cast<uint8_t>(rowWidthX10 & 0xFF);
+        payload[4] = static_cast<uint8_t>((targetPopulationD10 >> 8) & 0xFF);
+        payload[5] = static_cast<uint8_t>(targetPopulationD10 & 0xFF);
+        payload[6] = doublesX100;
+        payload[7] = runtime_cfg::planterMetric() ? 1 : 0;
+        planter_output::buildPacket(planter_output::PGN_CONFIG, payload, packet);
+        sendMonitorPacket(planter_output::UDP_PORT, packet, sizeof(packet));
+    }
+
+    {
+        uint8_t payload[8]{};
+        uint8_t packet[14]{};
+        for (uint8_t i = 0; i < 8; ++i) {
+            payload[i] = static_cast<uint8_t>(clampValue<uint32_t>(rowPopulation[i] / 1000u, 0u, 255u));
+        }
+        planter_output::buildPacket(planter_output::PGN_POP_BY_ROW_1_8, payload, packet);
+        sendMonitorPacket(planter_output::UDP_PORT, packet, sizeof(packet));
+    }
+
+    {
+        uint8_t payload[8]{};
+        uint8_t packet[14]{};
+        for (uint8_t i = 0; i < 8; ++i) {
+            payload[i] = static_cast<uint8_t>(
+                clampValue<uint32_t>(rowPopulation[8 + i] / 1000u, 0u, 255u)
+            );
+        }
+        planter_output::buildPacket(planter_output::PGN_POP_BY_ROW_9_16, payload, packet);
+        sendMonitorPacket(planter_output::UDP_PORT, packet, sizeof(packet));
+    }
+
+    {
+        uint8_t payload[8]{};
+        uint8_t packet[14]{};
+        planter_output::buildPacket(planter_output::PGN_DOUBLES, payload, packet);
+        sendMonitorPacket(planter_output::UDP_PORT, packet, sizeof(packet));
+        planter_output::buildPacket(planter_output::PGN_SKIPS, payload, packet);
+        sendMonitorPacket(planter_output::UDP_PORT, packet, sizeof(packet));
+    }
+
+    {
+        uint8_t payload[8]{};
+        uint8_t packet[14]{};
+        const uint16_t summaryPopulationD10 = static_cast<uint16_t>(
+            clampValue<uint32_t>(summaryPopulation / 10u, 0u, 65535u)
+        );
+        const uint16_t singulationX10 = 1000u;
+        payload[0] = static_cast<uint8_t>(summaryPopulationD10 & 0xFF);
+        payload[1] = static_cast<uint8_t>((summaryPopulationD10 >> 8) & 0xFF);
+        payload[2] = 0;
+        payload[3] = 0;
+        payload[4] = 0;
+        payload[5] = 0;
+        payload[6] = static_cast<uint8_t>(singulationX10 & 0xFF);
+        payload[7] = static_cast<uint8_t>((singulationX10 >> 8) & 0xFF);
+        planter_output::buildPacket(planter_output::PGN_SUMMARY, payload, packet);
+        sendMonitorPacket(planter_output::UDP_PORT, packet, sizeof(packet));
+    }
+
+    {
+        uint8_t payload[8]{};
+        uint8_t packet[14]{};
+        for (uint8_t rowIndex = 0; rowIndex < planterRows; ++rowIndex) {
+            const uint8_t nodeId = rowIndex + 1;
+            const uint8_t status = planter_output::estimateRowStatus(
+                ecu.sectionEnabled(nodeId),
+                nodeManager.node(nodeId),
+                ecu.sectionEnabled(nodeId) ? ecu.baseRpm() : 0.0f
+            );
+            const uint8_t payloadIndex = rowIndex / 4u;
+            const uint8_t shift = static_cast<uint8_t>((rowIndex % 4u) * 2u);
+            payload[payloadIndex] |= static_cast<uint8_t>((status & 0x03u) << shift);
+        }
+        payload[4] = ++planter_feedback_counter_;
+        payload[5] = static_cast<uint8_t>(overrideMask & 0xFF);
+        payload[6] = static_cast<uint8_t>((overrideMask >> 8) & 0xFF);
+        payload[7] = 0;
+        planter_output::buildPacket(planter_output::PGN_ROW_STATUS, payload, packet);
+        sendMonitorPacket(planter_output::UDP_PORT, packet, sizeof(packet));
+    }
+}
+
+void EthernetLink::sendBlockageOutput(const EcuState* ecus, const NodeManager* nodeManagers, uint8_t sensorCount) {
+    if (!runtime_cfg::monitorOutputEnabled() ||
+        runtime_cfg::monitorOutputMode() != static_cast<uint8_t>(MonitorOutputMode::BLOCKAGE) ||
+        sensorCount == 0) {
+        return;
+    }
+
+    const uint8_t configuredRows = runtime_cfg::configuredRowCount();
+    const uint8_t totalRows = clampValue<uint8_t>(
+        runtime_cfg::monitorRows(), 1u,
+        static_cast<uint8_t>(min<uint16_t>(100u, static_cast<uint16_t>(sensorCount) * configuredRows))
+    );
+    const uint8_t rowsPerModule = max<uint8_t>(1u, runtime_cfg::blockageRowsPerModule());
+
+    for (uint8_t globalRow = 0; globalRow < totalRows; ++globalRow) {
+        const uint8_t sensorIndex = globalRow / configuredRows;
+        const uint8_t nodeId = static_cast<uint8_t>((globalRow % configuredRows) + 1u);
+        if (sensorIndex >= sensorCount || nodeId > cfg::NODE_COUNT_MAX) {
+            break;
+        }
+
+        const EcuState& ecu = ecus[sensorIndex];
+        const NodeRuntimeState& nodeState = nodeManagers[sensorIndex].node(nodeId);
+        const float targetRpm = ecu.sectionEnabled(nodeId) ? ecu.baseRpm() : 0.0f;
+        const uint8_t rateByte = blockage_output::estimateRateByte(
+            runtime_cfg::planterTargetPopulation(),
+            targetRpm,
+            nodeState.actual_rpm
+        );
+        const uint8_t moduleId = static_cast<uint8_t>(globalRow / rowsPerModule);
+        const uint8_t rowInModule = static_cast<uint8_t>(globalRow % rowsPerModule);
+        uint8_t packet[5]{};
+        blockage_output::buildPacket32100(moduleId, rowInModule, rateByte, packet);
+        sendMonitorPacket(blockage_output::UDP_PORT, packet, sizeof(packet));
+    }
+}
+
+void EthernetLink::sendMonitorOutput(const EcuState* ecus, const NodeManager* nodeManagers, uint8_t sensorCount) {
+    if (!runtime_cfg::monitorOutputEnabled()) {
+        return;
+    }
+
+    switch (static_cast<MonitorOutputMode>(runtime_cfg::monitorOutputMode())) {
+        case MonitorOutputMode::PLANTER:
+            sendPlanterOutput(ecus, nodeManagers, sensorCount);
+            break;
+        case MonitorOutputMode::BLOCKAGE:
+            sendBlockageOutput(ecus, nodeManagers, sensorCount);
+            break;
+        case MonitorOutputMode::OFF:
+        default:
+            break;
     }
 }
 
@@ -850,6 +1106,7 @@ void EthernetLink::sendStatus(const EcuState* ecus, const NodeManager* nodeManag
     udp_.write(data, 15);
     udp_.endPacket();
 
+    sendMonitorOutput(ecus, nodeManagers, sensorCount);
     sendCustomDiagStream(ecus, nodeManagers, sensorCount);
 
     if (ETH_DEBUG_TX) {

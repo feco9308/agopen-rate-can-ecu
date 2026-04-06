@@ -72,6 +72,8 @@ class Block:
     DIAG = 2
     CHANNEL = 3
     NETWORK = 4
+    MONITOR = 5
+    PLANTER = MONITOR
 
 
 def packet_crc(packet_without_crc: bytes) -> int:
@@ -332,6 +334,58 @@ class EcuServiceTool(QMainWindow):
         network_buttons.addWidget(btn_set_net)
         network_form.addRow(network_buttons)
 
+        planter_box = QGroupBox("Monitor Output Config")
+        planter_form = QFormLayout(planter_box)
+
+        self.planter_enable_check = QCheckBox("Enable Monitor Output")
+        self.monitor_mode_combo = QComboBox()
+        self.monitor_mode_combo.addItems(["Off", "Planter", "Blockage"])
+        self.planter_rows_spin = QSpinBox()
+        self.planter_rows_spin.setRange(1, 100)
+        self.planter_rows_spin.setValue(6)
+        self.blockage_rows_per_module_spin = QSpinBox()
+        self.blockage_rows_per_module_spin.setRange(1, 16)
+        self.blockage_rows_per_module_spin.setValue(16)
+
+        self.planter_row_width_spin = QDoubleSpinBox()
+        self.planter_row_width_spin.setDecimals(1)
+        self.planter_row_width_spin.setRange(1.0, 200.0)
+        self.planter_row_width_spin.setValue(70.0)
+
+        self.planter_target_population_spin = QSpinBox()
+        self.planter_target_population_spin.setRange(0, 500000)
+        self.planter_target_population_spin.setValue(60000)
+
+        self.planter_doubles_factor_spin = QDoubleSpinBox()
+        self.planter_doubles_factor_spin.setDecimals(2)
+        self.planter_doubles_factor_spin.setRange(0.01, 10.0)
+        self.planter_doubles_factor_spin.setValue(2.0)
+
+        self.planter_metric_check = QCheckBox("Metric Units")
+        self.planter_metric_check.setChecked(True)
+        self.blockage_threshold_spin = QSpinBox()
+        self.blockage_threshold_spin.setRange(0, 255)
+        self.blockage_threshold_spin.setValue(20)
+
+        planter_form.addRow(self.planter_enable_check)
+        planter_form.addRow("Mode", self.monitor_mode_combo)
+        planter_form.addRow("Monitor Rows", self.planter_rows_spin)
+        planter_form.addRow("Rows / Module", self.blockage_rows_per_module_spin)
+        planter_form.addRow("Row Width cm", self.planter_row_width_spin)
+        planter_form.addRow("Target Population", self.planter_target_population_spin)
+        planter_form.addRow("Doubles Factor", self.planter_doubles_factor_spin)
+        planter_form.addRow(self.planter_metric_check)
+        planter_form.addRow("Blockage Threshold", self.blockage_threshold_spin)
+
+        planter_buttons = QHBoxLayout()
+        btn_get_planter = QPushButton("Get")
+        btn_get_planter.clicked.connect(self.request_monitor_config)
+        btn_set_planter = QPushButton("Set")
+        btn_set_planter.clicked.connect(self.send_monitor_config)
+        planter_buttons.addWidget(btn_get_planter)
+        planter_buttons.addWidget(btn_set_planter)
+        planter_form.addRow(planter_buttons)
+
         persist_box = QGroupBox("Persistence")
         persist_layout = QHBoxLayout(persist_box)
         btn_save = QPushButton("Save To ECU")
@@ -347,6 +401,7 @@ class EcuServiceTool(QMainWindow):
         grid.addWidget(diag_box, 1, 1)
         grid.addWidget(network_box, 2, 0)
         grid.addWidget(persist_box, 2, 1)
+        grid.addWidget(planter_box, 3, 0, 1, 2)
         return page
 
     def build_diag_tab(self) -> QWidget:
@@ -608,6 +663,51 @@ class EcuServiceTool(QMainWindow):
         ])
         self.send_packet(Pgn.ECU_CFG_SET, payload)
 
+    def request_monitor_config(self) -> None:
+        self.send_cfg_get(Block.MONITOR, 0)
+        self.send_cfg_get(Block.MONITOR, 1)
+        self.send_cfg_get(Block.MONITOR, 2)
+
+    def send_monitor_config(self) -> None:
+        payload_core = bytes([
+            Block.MONITOR,
+            0,
+            1 if self.planter_enable_check.isChecked() else 0,
+            self.monitor_mode_combo.currentIndex(),
+            self.planter_rows_spin.value(),
+            self.blockage_rows_per_module_spin.value(),
+            0,
+            0,
+        ])
+        self.send_packet(Pgn.ECU_CFG_SET, payload_core)
+
+        row_width_x10 = int(round(self.planter_row_width_spin.value() * 10.0))
+        target_population = self.planter_target_population_spin.value()
+        payload_target = bytes([
+            Block.MONITOR,
+            1,
+            row_width_x10 & 0xFF,
+            (row_width_x10 >> 8) & 0xFF,
+            target_population & 0xFF,
+            (target_population >> 8) & 0xFF,
+            (target_population >> 16) & 0xFF,
+            (target_population >> 24) & 0xFF,
+        ])
+        self.send_packet(Pgn.ECU_CFG_SET, payload_target)
+
+        doubles_x100 = int(round(self.planter_doubles_factor_spin.value() * 100.0))
+        payload_mode = bytes([
+            Block.MONITOR,
+            2,
+            doubles_x100 & 0xFF,
+            (doubles_x100 >> 8) & 0xFF,
+            1 if self.planter_metric_check.isChecked() else 0,
+            self.blockage_threshold_spin.value(),
+            0,
+            0,
+        ])
+        self.send_packet(Pgn.ECU_CFG_SET, payload_mode)
+
     def send_cfg_save(self) -> None:
         self.send_packet(Pgn.ECU_CFG_SAVE, bytes([0xA5, 0, 0, 0, 0, 0, 0, 0]))
 
@@ -641,6 +741,7 @@ class EcuServiceTool(QMainWindow):
         self.send_cfg_get(Block.DRIVE, 0)
         self.send_cfg_get(Block.DIAG, 0)
         self.send_cfg_get(Block.NETWORK, 0)
+        self.request_monitor_config()
         for sensor_index in range(4):
             self.send_cfg_get(Block.CHANNEL, sensor_index)
         self.send_diag_control()
@@ -898,6 +999,22 @@ class EcuServiceTool(QMainWindow):
                 f"RX CFG_STATUS CHANNEL index={index} drive={self.channel_drive_ratio_spin.value():.2f} "
                 f"motor={self.channel_motor_ratio_spin.value():.2f}"
             )
+        elif block == Block.MONITOR:
+            if index == 0:
+                self.planter_enable_check.setChecked(payload[2] != 0)
+                self.monitor_mode_combo.setCurrentIndex(min(payload[3], 2))
+                self.planter_rows_spin.setValue(max(1, payload[4]))
+                self.blockage_rows_per_module_spin.setValue(max(1, payload[5]))
+                self.log_line("RX CFG_STATUS MONITOR core")
+            elif index == 1:
+                self.planter_row_width_spin.setValue(parse_u16(payload[2], payload[3]) / 10.0)
+                self.planter_target_population_spin.setValue(parse_u32(payload[4:8]))
+                self.log_line("RX CFG_STATUS MONITOR target")
+            elif index == 2:
+                self.planter_doubles_factor_spin.setValue(parse_u16(payload[2], payload[3]) / 100.0)
+                self.planter_metric_check.setChecked(payload[4] != 0)
+                self.blockage_threshold_spin.setValue(payload[5])
+                self.log_line("RX CFG_STATUS MONITOR mode")
         else:
             self.log_line(f"RX CFG_STATUS block={block} payload={payload.hex(' ')}")
 

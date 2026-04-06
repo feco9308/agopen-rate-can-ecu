@@ -7,7 +7,7 @@
 
 namespace {
 
-constexpr uint16_t CONFIG_VERSION = 0x0102;
+constexpr uint16_t CONFIG_VERSION = 0x0104;
 constexpr int EEPROM_ADDR = 0;
 
 runtime_cfg::PersistentConfig g_config{};
@@ -67,6 +67,42 @@ void clampConfig(runtime_cfg::PersistentConfig& config) {
     if (config.ip_last_octet == 0) {
         config.ip_last_octet = 200;
     }
+
+    if (config.monitor_output_mode > static_cast<uint8_t>(MonitorOutputMode::BLOCKAGE)) {
+        config.monitor_output_mode = static_cast<uint8_t>(MonitorOutputMode::OFF);
+    }
+
+    if (config.monitor_rows == 0 || config.monitor_rows > 100) {
+        config.monitor_rows = config.configured_row_count;
+    }
+    const uint8_t maxMonitorRows = static_cast<uint8_t>(
+        min<uint16_t>(100u, static_cast<uint16_t>(config.active_sensor_count) * config.configured_row_count)
+    );
+    if (config.monitor_rows > maxMonitorRows) {
+        config.monitor_rows = maxMonitorRows;
+    }
+
+    if (config.planter_row_width_cm_x10 == 0) {
+        config.planter_row_width_cm_x10 =
+            static_cast<uint16_t>(cfg::DEFAULT_PLANTER_ROW_WIDTH_CM * 10.0f);
+    }
+
+    if (config.planter_target_population == 0) {
+        config.planter_target_population = cfg::DEFAULT_PLANTER_TARGET_POPULATION;
+    }
+
+    if (config.planter_doubles_factor_x100 == 0) {
+        config.planter_doubles_factor_x100 =
+            static_cast<uint16_t>(cfg::DEFAULT_PLANTER_DOUBLES_FACTOR * 100.0f);
+    }
+
+    if (config.blockage_rows_per_module == 0 || config.blockage_rows_per_module > cfg::NODE_COUNT_MAX) {
+        config.blockage_rows_per_module = cfg::DEFAULT_BLOCKAGE_ROWS_PER_MODULE;
+    }
+
+    if (config.blockage_threshold == 0) {
+        config.blockage_threshold = cfg::DEFAULT_BLOCKAGE_THRESHOLD;
+    }
 }
 
 void setDefaults(runtime_cfg::PersistentConfig& config) {
@@ -89,6 +125,17 @@ void setDefaults(runtime_cfg::PersistentConfig& config) {
     config.diag_detail_level = 0;
     config.ip_last_octet = 200;
     config.module_id = 0;
+    config.monitor_output_enable = 0;
+    config.monitor_output_mode = static_cast<uint8_t>(MonitorOutputMode::OFF);
+    config.monitor_rows = cfg::DEFAULT_CONFIGURED_ROW_COUNT;
+    config.planter_row_width_cm_x10 =
+        static_cast<uint16_t>(cfg::DEFAULT_PLANTER_ROW_WIDTH_CM * 10.0f);
+    config.planter_target_population = cfg::DEFAULT_PLANTER_TARGET_POPULATION;
+    config.planter_doubles_factor_x100 =
+        static_cast<uint16_t>(cfg::DEFAULT_PLANTER_DOUBLES_FACTOR * 100.0f);
+    config.planter_metric = cfg::DEFAULT_PLANTER_METRIC ? 1 : 0;
+    config.blockage_rows_per_module = cfg::DEFAULT_BLOCKAGE_ROWS_PER_MODULE;
+    config.blockage_threshold = cfg::DEFAULT_BLOCKAGE_THRESHOLD;
     config.checksum = checksumConfig(config);
 }
 
@@ -214,6 +261,56 @@ void setIpLastOctet(uint8_t octet) {
 
 uint8_t moduleId() { return g_config.module_id; }
 void setModuleId(uint8_t module_id) { g_config.module_id = module_id; }
+
+bool monitorOutputEnabled() { return g_config.monitor_output_enable != 0; }
+void setMonitorOutputEnabled(bool enabled) { g_config.monitor_output_enable = enabled ? 1 : 0; }
+
+uint8_t monitorOutputMode() { return g_config.monitor_output_mode; }
+void setMonitorOutputMode(uint8_t mode) {
+    g_config.monitor_output_mode = mode;
+    clampConfig(g_config);
+}
+
+uint8_t monitorRows() { return g_config.monitor_rows; }
+void setMonitorRows(uint8_t rows) {
+    g_config.monitor_rows = rows;
+    clampConfig(g_config);
+}
+
+float planterRowWidthCm() { return g_config.planter_row_width_cm_x10 / 10.0f; }
+void setPlanterRowWidthCm(float row_width_cm) {
+    g_config.planter_row_width_cm_x10 =
+        (row_width_cm <= 0.0f) ? 0 : static_cast<uint16_t>(row_width_cm * 10.0f);
+    clampConfig(g_config);
+}
+
+uint32_t planterTargetPopulation() { return g_config.planter_target_population; }
+void setPlanterTargetPopulation(uint32_t target_population) {
+    g_config.planter_target_population = target_population;
+    clampConfig(g_config);
+}
+
+float planterDoublesFactor() { return g_config.planter_doubles_factor_x100 / 100.0f; }
+void setPlanterDoublesFactor(float factor) {
+    g_config.planter_doubles_factor_x100 =
+        (factor <= 0.0f) ? 0 : static_cast<uint16_t>(factor * 100.0f);
+    clampConfig(g_config);
+}
+
+bool planterMetric() { return g_config.planter_metric != 0; }
+void setPlanterMetric(bool metric) { g_config.planter_metric = metric ? 1 : 0; }
+
+uint8_t blockageRowsPerModule() { return g_config.blockage_rows_per_module; }
+void setBlockageRowsPerModule(uint8_t rows_per_module) {
+    g_config.blockage_rows_per_module = rows_per_module;
+    clampConfig(g_config);
+}
+
+uint8_t blockageThreshold() { return g_config.blockage_threshold; }
+void setBlockageThreshold(uint8_t threshold) {
+    g_config.blockage_threshold = threshold;
+    clampConfig(g_config);
+}
 
 void applyToEcu(EcuState& ecu, uint8_t sensor_index) {
     ecu.setHolesPerRev(holesPerRev());

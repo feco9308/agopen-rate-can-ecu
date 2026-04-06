@@ -15,7 +15,7 @@ static constexpr float RPM_MAX = 10000.0f;
 
 // geometry / machine defaults
 static constexpr uint8_t MAX_SENSOR_CHANNELS = 4;           // compiled-in capacity
-static constexpr uint8_t DEFAULT_ACTIVE_SENSOR_CHANNELS = 4;
+static constexpr uint8_t DEFAULT_ACTIVE_SENSOR_CHANNELS = 1;
 static constexpr uint8_t PGN_SECTION_BIT_COUNT = 16;          // relay_lo + relay_hi
 static constexpr uint8_t NODE_COUNT_MAX = 16;                // current CAN node range uses 0x101..0x110
 static constexpr uint8_t DEFAULT_CONFIGURED_ROW_COUNT = 6;   // rows/sections configured in the machine
@@ -23,7 +23,12 @@ static constexpr uint16_t DEFAULT_HOLES_PER_REV = 26;
 static constexpr float DEFAULT_DRIVE_RATIO = 1.0f;         // disc-side drivetrain multiplier
 static constexpr float DEFAULT_MOTOR_RATIO = 2.0f;         // motor rpm / disc rpm after drivetrain
 static constexpr float DEFAULT_UPM_SCALE = 100.0f;         // ECU-side scaling for AOG target_upm
-
+static constexpr float DEFAULT_PLANTER_ROW_WIDTH_CM = 70.0f;
+static constexpr uint32_t DEFAULT_PLANTER_TARGET_POPULATION = 60000u;
+static constexpr float DEFAULT_PLANTER_DOUBLES_FACTOR = 2.0f;
+static constexpr bool DEFAULT_PLANTER_METRIC = true;
+static constexpr uint8_t DEFAULT_BLOCKAGE_ROWS_PER_MODULE = 16;
+static constexpr uint8_t DEFAULT_BLOCKAGE_THRESHOLD = 20;
 // sync
 static constexpr float POSITION_KP = 0.5f;
 static constexpr float TRIM_RPM_LIMIT = 200.0f;
@@ -75,6 +80,12 @@ enum ControlFlags : uint8_t {
     CTRL_SYNC_ENABLE  = 1 << 1,
     CTRL_ESTOP        = 1 << 2,
     CTRL_DIAG_ENABLE  = 1 << 3
+};
+
+enum class MonitorOutputMode : uint8_t {
+    OFF = 0,
+    PLANTER = 1,
+    BLOCKAGE = 2
 };
 
 enum NodeCommandCode : uint8_t {

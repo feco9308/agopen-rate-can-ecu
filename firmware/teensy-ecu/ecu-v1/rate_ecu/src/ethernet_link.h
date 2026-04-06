@@ -39,6 +39,10 @@ private:
                              uint8_t sensorCount,
                              uint8_t sensorMask,
                              uint16_t nodeMask);
+    void sendMonitorPacket(uint16_t port, const uint8_t* data, size_t len);
+    void sendPlanterOutput(const EcuState* ecus, const NodeManager* nodeManagers, uint8_t sensorCount);
+    void sendBlockageOutput(const EcuState* ecus, const NodeManager* nodeManagers, uint8_t sensorCount);
+    void sendMonitorOutput(const EcuState* ecus, const NodeManager* nodeManagers, uint8_t sensorCount);
     void sendCustomDiagStream(const EcuState* ecus, const NodeManager* nodeManagers, uint8_t sensorCount);
 
 private:
@@ -50,7 +54,9 @@ private:
     uint32_t last_rc_rx_ms_ = 0;
     uint32_t last_status_tx_ms_ = 0;
     uint32_t last_custom_diag_tx_ms_ = 0;
+    uint32_t last_planter_cfg_tx_ms_ = 0;
     uint16_t custom_destination_port_ = custom_pgn::UDP_DEST_PORT;
+    uint8_t planter_feedback_counter_ = 0;
 
     uint8_t module_id_ = 0;
     uint8_t sensor_count_ = cfg::DEFAULT_ACTIVE_SENSOR_CHANNELS;

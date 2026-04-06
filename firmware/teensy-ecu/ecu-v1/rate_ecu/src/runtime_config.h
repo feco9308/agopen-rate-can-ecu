@@ -24,6 +24,15 @@ struct PersistentConfig {
     uint8_t diag_detail_level;
     uint8_t ip_last_octet;
     uint8_t module_id;
+    uint8_t monitor_output_enable;
+    uint8_t monitor_output_mode;
+    uint8_t monitor_rows;
+    uint16_t planter_row_width_cm_x10;
+    uint32_t planter_target_population;
+    uint16_t planter_doubles_factor_x100;
+    uint8_t planter_metric;
+    uint8_t blockage_rows_per_module;
+    uint8_t blockage_threshold;
     uint16_t checksum;
 };
 
@@ -72,6 +81,33 @@ void setIpLastOctet(uint8_t octet);
 
 uint8_t moduleId();
 void setModuleId(uint8_t module_id);
+
+bool monitorOutputEnabled();
+void setMonitorOutputEnabled(bool enabled);
+
+uint8_t monitorOutputMode();
+void setMonitorOutputMode(uint8_t mode);
+
+uint8_t monitorRows();
+void setMonitorRows(uint8_t rows);
+
+float planterRowWidthCm();
+void setPlanterRowWidthCm(float row_width_cm);
+
+uint32_t planterTargetPopulation();
+void setPlanterTargetPopulation(uint32_t target_population);
+
+float planterDoublesFactor();
+void setPlanterDoublesFactor(float factor);
+
+bool planterMetric();
+void setPlanterMetric(bool metric);
+
+uint8_t blockageRowsPerModule();
+void setBlockageRowsPerModule(uint8_t rows_per_module);
+
+uint8_t blockageThreshold();
+void setBlockageThreshold(uint8_t threshold);
 
 void applyToEcu(EcuState& ecu, uint8_t sensor_index);
 void applyToEcus(EcuState* ecus, uint8_t max_count);
