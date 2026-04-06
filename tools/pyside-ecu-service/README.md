@@ -1,370 +1,372 @@
 # PySide ECU Service Tool
 
-Magyar leírás a `tools/pyside-ecu-service/ecu_service_tool.py` programhoz.
+Magyar leiras a `tools/pyside-ecu-service/ecu_service_tool.py` programhoz.
 
-## Mire való
+## Mire valo
 
-Ez a program az ECU-val beszél UDP-n keresztül.
+Ez a program az ECU-val beszel UDP-n keresztul.
 
-Fő céljai:
-- ECU konfiguráció olvasása és írása
-- ECU beállítások mentése / visszatöltése
-- diagnosztikai stream kérése az ECU-tól
-- node service parancsok küldése az ECU-n keresztül a CAN buszra
+Fo feladatai:
+- ECU konfiguracio olvasasa es irasa
+- ECU beallitasok mentese / visszatoltese
+- diagnosztikai stream kerese az ECU-tol
+- node service parancsok kuldese az ECU-n keresztul a CAN buszra
+- monitor output mod valasztasa (`Off / Planter / Blockage`)
 
-Röviden:
-- ez a program az ECU beállító és szerviz eszköze
-- nem közvetlenül a motor node-okkal beszél Etherneten
-- hanem az ECU custom UDP PGN-jeit használja
+Roviden:
+- ez a program az ECU beallito es szerviz eszkoze
+- nem kozvetlenul a motor node-okkal beszel Etherneten
+- hanem az ECU custom UDP PGN-jeit hasznalja
 
-## Hálózati működés
+## Halozati mukodes
 
-Alapértékek:
-- küldés az ECU felé: `UDP 28888`
-- fogadás az ECU custom válaszaira: `UDP 30001`
-- alap cél IP: `192.168.1.255`
+Alapertekek:
+- kuldes az ECU fele: `UDP 28888`
+- fogadas az ECU custom valaszaira: `UDP 30001`
+- alap cel IP: `192.168.1.255`
 
-Ha nem broadcast kell, a felső sorban átírható a cél IP, például:
+Ha nem broadcast kell, a felso sorban atirhato a cel IP, peldaul:
 - `192.168.1.200`
 
-## Felső sáv
+## Felso sav
 
 ### `ECU IP / Broadcast`
 
-Ide kerül az ECU IP-je vagy a broadcast cím.
+Ide kerul az ECU IP-je vagy a broadcast cim.
 
-Példák:
+Peldak:
 - `192.168.1.200`
 - `192.168.1.255`
 
 ### `Apply Target`
 
-Elmenti a cél IP-t a programban.
+Elmenti a cel IP-t a programban.
 
 ### `RX`
 
 Mutatja, hogy a tool figyeli-e a `30001` portot.
 
-Jó állapot például:
+Jo allapot peldaul:
 - `RX: listening on *:30001`
 
 ### `Retry RX Bind`
 
-Újra megpróbálja megnyitni a figyelő UDP portot.
+Ujra megprobalja megnyitni a figyelo UDP portot.
 
-Ez akkor kellhet, ha:
-- a port foglalt volt
-- a program indulásakor valamiért nem tudott bindolni
+## `ECU Config` ful
 
-## `ECU Config` fül
-
-Ez az ECU saját beállításaira való.
+Ez az ECU sajat beallitasaira valo.
 
 ### `Machine Config`
 
 #### `Active Sensors`
 
-Hány szenzorcsatornát használjon az ECU.
+Hany szenzorcsatornat hasznaljon az ECU.
 
-Jelenlegi firmware oldali tipikus érték:
+Jelenlegi firmware oldali tartomany:
 - `1..4`
 
 #### `Configured Rows`
 
-Hány sor / szakasz legyen aktív a gépben.
+Hany sor / szakasz legyen aktiv a gepben.
 
-Ez hatással van például:
-- hány `NODE_CMD` megy ki CAN-en
-- hány node-ot vesz figyelembe az ECU
-- UPM -> RPM számításra
+Ez hatassal van peldaul:
+- hany `NODE_CMD` megy ki CAN-en
+- hany node-ot vesz figyelembe az ECU
+- UPM -> RPM szamitasra
+- diag auto node-detail maximumara
 
 #### `Holes / Rev`
 
-A vetőtárcsa furatszáma.
+A vetotarcsa furatszama.
 
 #### `UPM Scale`
 
-Az ECU oldali skála a Rate App `target_upm` értékéhez.
-
-### `Get`
-
-Lekéri az adott blokk aktuális ECU értékeit.
-
-### `Set`
-
-Elküldi a blokkban látható értékeket az ECU-nak.
-
-Fontos:
-- ez még nem feltétlenül menti EEPROM-ba
-- futás közben átírja a runtime configot
+Az ECU oldali skala a Rate App `target_upm` ertekehez.
 
 ### `Drive Config`
 
-#### `Gear Ratio`
-
-Motor / tárcsa áttétel.
+Ez valojaban nem attetelt jelent, hanem szinkron / trim konfiguraciot.
 
 #### `Trim Limit RPM`
 
-A pozíció alapú finomkorrekció maximális RPM eltérése.
+A soronkenti korrekcio maximalis RPM elterese.
+
+Ekkora `+/- trim_rpm` mehet ki egy node-ra.
 
 #### `Position Kp`
 
-A pozícióhibából számolt trim arányossági tényezője.
+A poziciohibabol szamolt trim erossege.
+
+Minel nagyobb, annal agresszivebben korrigalja a node-okat.
+
+### `Channel Ratio Config`
+
+Ez a szenzoronkenti attetel konfig.
+
+#### `Sensor Channel`
+
+Melyik csatorna attetelet szerkeszted:
+- `0`
+- `1`
+- `2`
+- `3`
+
+#### `Drive Ratio`
+
+Szenzoronkenti gep / hajtas oldali szorzo.
+
+#### `Motor Ratio`
+
+Szenzoronkenti motor oldali szorzo.
+
+A vegso szamitasban a ketto szorzata megy:
+- `combined_ratio = drive_ratio * motor_ratio`
 
 ### `Diag Config`
 
+Ez az ECU sajat diagnosztikai viselkedeset szabalyzza.
+
 #### `Enable Diagnostics`
 
-Bekapcsolja az ECU diag funkciót.
+Bekapcsolja az ECU diag modjat.
+
+Ez kapcsolja a `GLOBAL_CONTROL.ctrl_diag_enable` bitet is, tehat a motor node-ok ezt latjak CAN-en.
 
 #### `Enable Stream`
 
-Folyamatosan küldi a diagnosztikai adatokat.
+Folyamatosan kuldje-e az ECU a summary diag adatokat UDP-n a service tool fele.
 
 #### `Diag Period ms`
 
-Milyen gyakran menjen a diag stream.
+Milyen gyakran menjen a summary diag stream.
 
 #### `Diag Detail`
 
-Alap vagy bővített részletesség.
+Basic vagy Extended reszletesseg.
+
+Jelenleg a fo kulonbseg inkabb a tool oldali kezelesben van, nem a teljes rendszer logikajaban.
 
 ### `Network Config`
 
 #### `IP Last Octet`
 
-Az ECU IP címének utolsó tagja.
+Az ECU IP cimenek utolso tagja.
 
-Példa:
+Pelda:
 - `200` -> `192.168.1.200`
 
 #### `Module ID`
 
-A Rate App felé használt modulazonosító.
+A Rate App fele hasznalt modulazonosito.
+
+### `Monitor Output Config`
+
+Ez a kulso monitor alkalmazasok fele mennyo opcionális UDP kimenet.
+
+#### `Enable Monitor Output`
+
+Ha ki van kapcsolva:
+- az ECU nem kuld monitor outputot
+
+Ha be van kapcsolva:
+- az ECU a kivalasztott mod szerint kuld kimeneti csomagokat
+
+#### `Mode`
+
+Valaszthato mod:
+- `Off`
+- `Planter`
+- `Blockage`
+
+Jelentes:
+- `Off`: semmit nem kuld
+- `Planter`: AOGPlanterV2 fele kuld kompatibilis UDP csomagokat
+- `Blockage`: BlockageMonitor fele kuld kompatibilis UDP csomagokat
+
+#### `Monitor Rows`
+
+Hany logikai sort kuldjon ki a monitor output modul.
+
+Ez nem feltetlenul ugyanaz, mint a `Configured Rows`, de altalaban ahhoz igazodik.
+
+#### `Rows / Module`
+
+Blockage modban hasznalt felosztas.
+
+Megadja, hogy egy logikai module-ra hany sor essen.
+
+#### `Row Width cm`
+
+Planter modban hasznalt sortav.
+
+#### `Target Population`
+
+A planter / blockage becsles alapja.
+
+#### `Doubles Factor`
+
+Planter modban konfiguracios parameter.
+
+#### `Metric Units`
+
+Planter modban metrikus megjeleniteshez hasznalt flag.
+
+#### `Blockage Threshold`
+
+Blockage modhoz tartozik.
+
+Az ECU csak tovabbitja a beallitast; a blockage app sajat logikaja is hasznalhatja.
 
 ### `Persistence`
 
 #### `Save To ECU`
 
-Elmenti az aktuális configot az ECU nem felejtő tárába.
+Elmenti az aktualis configot az ECU nem felejto taraba.
 
 #### `Load From ECU`
 
-Visszatölti a korábban mentett beállításokat.
+Visszatolti a korabban mentett beallitasokat.
 
-## `Diag` fül
+## `Diag` ful
 
-Ez az ECU összesített állapotának figyelésére való.
+Ez az ECU osszesitett allapotanak figyelesere valo.
 
 ### `Enable`
 
-Bekapcsolja a diagnosztikát.
+Bekapcsolja a diagnosztikat az ECU-ban.
 
 ### `Stream`
 
-Folyamatos diagnosztikai küldést kér.
+Folyamatos summary diagnosztikai kuldest ker az ECU-tol.
 
 ### `S0`, `S1`, `S2`, `S3`
 
-Kiválasztja, mely szenzorcsatornákról kérjen adatot.
+Kivalasztja, mely szenzorcsatornakrol kerjen adatot a tool.
 
 ### `Node Mask Hex`
 
-Hexadecimális node maszk.
+Hexadecimalis node maszk a reszletes node-diag lekereshez.
 
-Példa:
-- `FFFF` = az első 16 node mind engedélyezett
+Bitek:
+- bit0 = node1
+- bit1 = node2
+- ...
+- bit15 = node16
+
+Peldak:
+- `0001` = csak node1
+- `0020` = csak node6
+- `003F` = node1..6
+- `FFFF` = node1..16, illetve a `Configured Rows` maximumaig
+
+Mit csinal:
+- az `Auto Node Details` ezen a maszkon lepked vegig
+- a reszletes also tablaba ezekrol a node-okrol ker adatot
+
+Mit nem csinal:
+- nem tilt le motorokat
+- nem valtoztatja a Rate App mukodeset
+- nem maszkolja a `GLOBAL_CONTROL` vagy `NODE_CMD` kuldest
 
 ### `Period ms`
 
-A diag stream periódusa.
+A summary diag stream periodusa.
 
 ### `Detail`
 
-Basic vagy Extended részletesség.
+Basic vagy Extended reszletesseg.
+
+### `Detail Sensor`
+
+Kezileg melyik szenzorrol kerj reszletes node adatot.
+
+### `Detail Node`
+
+Kezileg melyik node-rol kerj reszletes adatot.
+
+### `Auto Node Details`
+
+Lassu, korbejaro node-diag lekeres.
+
+A kivalasztott:
+- szenzor pipak
+- `Node Mask Hex`
+- `Configured Rows`
+
+alapjan vegigmegy a node-okon, es nem kell kezzel gombot nyomogatni.
+
+### `Auto ms`
+
+Az automatikus node-detail lekeres periodusa.
 
 ### `Send Diag Control`
 
-Elküldi a fenti diag beállításokat az ECU-nak.
+Elkuldi a fenti diag beallitasokat az ECU-nak.
 
 ### `Request ECU Status`
 
-Lekéri a fő ECU blokkokat és elküldi a diag controlt.
+Lekeri a fo ECU blokkokat es elkuldi a diag controlt.
 
-Ez jó első tesztgomb.
+Ez jo elso tesztgomb.
 
 ### `Request Node Details`
 
-Nem folyamatos streamet kér, hanem egyszeri részletes node-diag lekérést a kiválasztott:
+Egyszeri reszletes node-diag lekeres a kivalasztott:
 - szenzorra
 - node-ra
 
-Ez azért fontos, mert a részletes node-diag csomagok sokkal nagyobb Ethernet forgalmat okoznak, ezért már nem megyenek folyamatos streamben.
+### Felso summary tabla
 
-### Alsó tábla
-
-Szenzoronként mutatja:
-- mód
+Szenzoronkent mutatja:
+- mod
 - base RPM
 - target UPM
-- online node darabszám
-- átlagos RPM
-- összegzett RPM
+- online node darabszam
+- atlagos RPM
+- osszegzett RPM
 
-### Node diag tábla
+### Also node diag tabla
 
-Az összesített szenzor sorok alatt egy külön node-szintű diagnosztikai tábla is van.
-
-Ebben node-onként látszik:
+Node-onkent latszik:
 - szenzor
 - node
 - status flags
 - error code
 - actual RPM
-- pozíció
-- buszfeszültség
-- motoráram
-- vezérlő hőmérséklet
-- motor hőmérséklet
+- pozicio
+- buszfeszultseg
+- motoraram
+- vezerlo homerseklet
+- motor homerseklet
 - warning bitek
 - fault bitek
 
-Ez már az ECU által a CAN-ről összegyűjtött és UDP-n továbbadott részletes node diag adat.
+## `Node Service` ful
 
-## `Node Service` fül
+Ez a motor node provisioning / szerviz resz.
 
-Ez a motor node provisioning / szerviz rész.
+Itt a tool nem kozvetlenul a node-hoz beszel Etherneten, hanem:
+- UDP-n szol az ECU-nak
+- az ECU service CAN frame-eket kuld a buszra
 
-Itt a tool nem közvetlenül a node-hoz beszél Etherneten, hanem:
-- UDP-n szól az ECU-nak
-- az ECU service CAN frame-eket küld a buszra
+Fo funkciok:
+- discover
+- assign
+- save cfg
+- test spin
+- diag req
+- cfg read
+- identify
+- reboot
+- set CAN source
 
-### `Discover`
+## Monitor output megjegyzes
 
-#### `Delay Slots`
+A `Planter` es `Blockage` mod jelenleg becsult adatokat is hasznal.
 
-A discover válaszok késleltetésének slot értéke.
+Ez azt jelenti:
+- a rate / population jellegu ertekek motor RPM alapon vannak becsulve
+- nem tenyleges magszenzoros meresbol jonnek
 
-#### `Request UID`
-
-Kérjen UID választ a node-októl.
-
-#### `Request CFG`
-
-Kérjen config választ is.
-
-#### `Send Discover`
-
-Broadcast discover a service CAN-en.
-
-### `Target Node`
-
-#### `UID32 Hex`
-
-A kiválasztott node 32 bites UID azonosítója hexában.
-
-#### `Sensor Channel`
-
-Melyik logikai szenzorhoz tartozzon a node.
-
-#### `Node ID`
-
-Melyik sor / node legyen.
-
-#### `CAN Profile`
-
-Melyik CAN bankot figyelje.
-
-### `Assign`
-
-UID alapján kiosztja a node szerepét.
-
-### `Save CFG`
-
-Eltároltatja a node configját.
-
-### `Service Actions`
-
-#### `Test RPM`
-
-Teszt forgatási fordulat.
-
-#### `Duration s`
-
-Teszt időtartama másodpercben.
-
-#### `Identify Mode`
-
-Például:
-- `LED Blink`
-- `Short Jog`
-
-#### `Test Spin`
-
-Rövid forgatás teszt.
-
-#### `Diag Req`
-
-Node diag kérés.
-
-#### `CFG Read`
-
-Node config visszaolvasás.
-
-#### `Set CAN Source`
-
-Beállítja, melyik szenzor / node / CAN profil alapján figyeljen.
-
-#### `Identify`
-
-Azonosító parancs a node-nak.
-
-#### `Reboot`
-
-Node újraindítás.
-
-## Alsó log ablak
-
-Ide kerülnek:
-- TX PGN üzenetek
-- RX ECU diag válaszok
-- node service válaszok
-- hibák
-
-Ha valami nem működik, ez az első hely, amit nézni érdemes.
-
-## Tipikus használat
-
-### ECU beállítás
-
-1. cél IP beállítása
-2. `Apply Target`
-3. `ECU Config` fülön `Get`
-4. értékek átírása
-5. `Set`
-6. ha jó, `Save To ECU`
-
-### Node keresés és kiosztás
-
-1. `Node Service`
-2. `Send Discover`
-3. UID beírása
-4. `Sensor Channel`, `Node ID`, `CAN Profile` beállítása
-5. `Assign`
-6. `Save CFG`
-
-### Diagnosztika
-
-1. `Diag` fül
-2. `Enable`
-3. opcionálisan `Stream`
-4. szenzorok kijelölése
-5. `Send Diag Control`
-6. `Request ECU Status`
-
-## Futtatás
-
-```powershell
-python tools\pyside-ecu-service\ecu_service_tool.py
-```
+Ez kompatibilitasi modnak jo, de nem teljesen azonos egy valodi seed sensor rendszerrel.

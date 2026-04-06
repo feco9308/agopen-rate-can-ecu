@@ -13,6 +13,9 @@ This folder contains the main technical documentation for the CAN-based seeder E
 - `ecu-service-tool-pgns.md`
   Custom UDP PGNs used by the PySide ECU Service Tool and the Teensy ECU.
 
+- `monitor-output.md`
+  Optional external monitor output modes (`Off / Planter / Blockage`) and their data mapping.
+
 - `session-notes.md`
   Rolling project notes and recent development context.
 
