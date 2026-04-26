@@ -48,6 +48,7 @@ class Pgn:
     ECU_DIAG_NODE_DETAIL_A = 32809
     ECU_DIAG_NODE_DETAIL_B = 32810
     ECU_DIAG_NODE_DETAIL_REQ = 32811
+    ECU_DIAG_NODE_DETAIL_C = 32812
 
     NODE_DISCOVER = 32900
     NODE_UID_A = 32901
@@ -73,6 +74,7 @@ class Block:
     CHANNEL = 3
     NETWORK = 4
     MONITOR = 5
+    RATE_APP = 6
     PLANTER = MONITOR
 
 
@@ -128,6 +130,12 @@ class NodeDiag:
     motor_temp: int = 0
     warning_flags: int = 0
     fault_flags: int = 0
+    seed_flags: int = 0
+    blockage_pct: int = 0
+    slowdown_pct: int = 0
+    skip_pct: int = 0
+    double_pct: int = 0
+    singulation_pct: int = 100
 
 
 class EcuServiceTool(QMainWindow):
@@ -334,6 +342,22 @@ class EcuServiceTool(QMainWindow):
         network_buttons.addWidget(btn_set_net)
         network_form.addRow(network_buttons)
 
+        rate_app_box = QGroupBox("Rate App Config")
+        rate_app_form = QFormLayout(rate_app_box)
+
+        self.rate_app_mode_combo = QComboBox()
+        self.rate_app_mode_combo.addItems(["Legacy", "SK21"])
+        rate_app_form.addRow("Mode", self.rate_app_mode_combo)
+
+        rate_app_buttons = QHBoxLayout()
+        btn_get_rate_app = QPushButton("Get")
+        btn_get_rate_app.clicked.connect(lambda: self.send_cfg_get(Block.RATE_APP, 0))
+        btn_set_rate_app = QPushButton("Set")
+        btn_set_rate_app.clicked.connect(self.send_rate_app_config)
+        rate_app_buttons.addWidget(btn_get_rate_app)
+        rate_app_buttons.addWidget(btn_set_rate_app)
+        rate_app_form.addRow(rate_app_buttons)
+
         planter_box = QGroupBox("Monitor Output Config")
         planter_form = QFormLayout(planter_box)
 
@@ -400,8 +424,9 @@ class EcuServiceTool(QMainWindow):
         grid.addWidget(channel_box, 1, 0)
         grid.addWidget(diag_box, 1, 1)
         grid.addWidget(network_box, 2, 0)
-        grid.addWidget(persist_box, 2, 1)
+        grid.addWidget(rate_app_box, 2, 1)
         grid.addWidget(planter_box, 3, 0, 1, 2)
+        grid.addWidget(persist_box, 4, 0, 1, 2)
         return page
 
     def build_diag_tab(self) -> QWidget:
@@ -482,7 +507,7 @@ class EcuServiceTool(QMainWindow):
         layout.addWidget(controls_box)
         layout.addWidget(self.sensor_table)
 
-        self.node_table = QTableWidget(0, 12)
+        self.node_table = QTableWidget(0, 18)
         self.node_table.setHorizontalHeaderLabels(
             [
                 "Sensor",
@@ -495,6 +520,12 @@ class EcuServiceTool(QMainWindow):
                 "Current A",
                 "Ctrl C",
                 "Motor C",
+                "Seed Flags",
+                "Block %",
+                "Slow %",
+                "Skip %",
+                "Double %",
+                "Sing %",
                 "Warnings",
                 "Faults",
             ]
@@ -663,6 +694,19 @@ class EcuServiceTool(QMainWindow):
         ])
         self.send_packet(Pgn.ECU_CFG_SET, payload)
 
+    def send_rate_app_config(self) -> None:
+        payload = bytes([
+            Block.RATE_APP,
+            0,
+            self.rate_app_mode_combo.currentIndex(),
+            0,
+            0,
+            0,
+            0,
+            0,
+        ])
+        self.send_packet(Pgn.ECU_CFG_SET, payload)
+
     def request_monitor_config(self) -> None:
         self.send_cfg_get(Block.MONITOR, 0)
         self.send_cfg_get(Block.MONITOR, 1)
@@ -741,6 +785,7 @@ class EcuServiceTool(QMainWindow):
         self.send_cfg_get(Block.DRIVE, 0)
         self.send_cfg_get(Block.DIAG, 0)
         self.send_cfg_get(Block.NETWORK, 0)
+        self.send_cfg_get(Block.RATE_APP, 0)
         self.request_monitor_config()
         for sensor_index in range(4):
             self.send_cfg_get(Block.CHANNEL, sensor_index)
@@ -962,6 +1007,8 @@ class EcuServiceTool(QMainWindow):
             self.handle_diag_node_detail_a(payload)
         elif pgn == Pgn.ECU_DIAG_NODE_DETAIL_B:
             self.handle_diag_node_detail_b(payload)
+        elif pgn == Pgn.ECU_DIAG_NODE_DETAIL_C:
+            self.handle_diag_node_detail_c(payload)
         else:
             self.log_line(f"RX PGN {pgn} from {host}:{port} payload={payload.hex(' ')}")
 
@@ -991,6 +1038,9 @@ class EcuServiceTool(QMainWindow):
             self.ip_last_octet_spin.setValue(payload[2])
             self.module_id_spin.setValue(payload[3])
             self.log_line("RX CFG_STATUS NETWORK")
+        elif block == Block.RATE_APP:
+            self.rate_app_mode_combo.setCurrentIndex(min(payload[2], 1))
+            self.log_line("RX CFG_STATUS RATE_APP")
         elif block == Block.CHANNEL:
             self.channel_cfg_spin.setValue(index)
             self.channel_drive_ratio_spin.setValue(parse_u16(payload[2], payload[3]) / 100.0)
@@ -1078,6 +1128,23 @@ class EcuServiceTool(QMainWindow):
             f"RX ECU_DIAG_NODE_DETAIL_B s{sensor} n{node_id} bus={diag.bus_voltage:.1f} current={diag.motor_current:.1f}"
         )
 
+    def handle_diag_node_detail_c(self, payload: bytes) -> None:
+        sensor = payload[0]
+        node_id = payload[1]
+        key = (sensor, node_id)
+        diag = self.node_diags.get(key, NodeDiag(sensor=sensor, node_id=node_id))
+        diag.seed_flags = payload[2]
+        diag.blockage_pct = payload[3]
+        diag.slowdown_pct = payload[4]
+        diag.skip_pct = payload[5]
+        diag.double_pct = payload[6]
+        diag.singulation_pct = payload[7]
+        self.node_diags[key] = diag
+        self.refresh_node_table()
+        self.log_line(
+            f"RX ECU_DIAG_NODE_DETAIL_C s{sensor} n{node_id} block={diag.blockage_pct}% slow={diag.slowdown_pct}%"
+        )
+
     def refresh_sensor_row(self, sensor: int) -> None:
         diag = self.sensor_diags[sensor]
         values = [
@@ -1114,6 +1181,12 @@ class EcuServiceTool(QMainWindow):
                 f"{diag.motor_current:.1f}",
                 str(diag.controller_temp),
                 str(diag.motor_temp),
+                f"0x{diag.seed_flags:02X}",
+                str(diag.blockage_pct),
+                str(diag.slowdown_pct),
+                str(diag.skip_pct),
+                str(diag.double_pct),
+                str(diag.singulation_pct),
                 f"0x{diag.warning_flags:02X}",
                 f"0x{diag.fault_flags:02X}",
             ]

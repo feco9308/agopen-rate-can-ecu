@@ -1,0 +1,164 @@
+VERSION "AgOpen local development DBC for STM32G node bringup"
+
+NS_ :
+	NS_DESC_
+	CM_
+	BA_DEF_
+	BA_
+	VAL_
+	CAT_DEF_
+	CAT_
+	FILTER
+	BA_DEF_DEF_
+	EV_DATA_
+	ENVVAR_DATA_
+	SGTYPE_
+	SGTYPE_VAL_
+	BA_DEF_SGTYPE_
+	BA_SGTYPE_
+	SIG_TYPE_REF_
+	VAL_TABLE_
+	SIG_GROUP_
+	SIG_VALTYPE_
+	SIGTYPE_VALTYPE_
+	BO_TX_BU_
+	BA_DEF_REL_
+	BA_REL_
+	BA_DEF_DEF_REL_
+	BU_SG_REL_
+	BU_EV_REL_
+	BU_BO_REL_
+	SG_MUL_VAL_
+
+BS_:
+
+BU_: MASTER TOOL NODE1
+
+VAL_TABLE_ VT_system_mode 0 "OFF" 1 "MANUAL" 2 "AUTO" 3 "CALIBRATION" 4 "FAULT_HOLD";
+VAL_TABLE_ VT_node_command 0 "NOP" 1 "ENABLE" 2 "DISABLE" 3 "ZERO_POS" 4 "CLEAR_FAULT";
+VAL_TABLE_ VT_debug_fault 0 "NONE" 1 "CLOCK" 2 "FDCAN_INIT" 3 "FDCAN_START" 4 "CAN_TX" 5 "CAN_RX" 6 "SENSOR_INIT" 7 "SENSOR_READ" 8 "DRIVER_INIT" 9 "MOTOR_CONTROL" 10 "DRIVER_SPI_VERIFY" 11 "DRIVER_SPI_VERIFY_CTRL1";
+VAL_TABLE_ VT_debug_stage 0 "RESET" 1 "CLOCK_OK" 2 "GPIO_OK" 3 "FDCAN_INIT_OK" 4 "FDCAN_START_OK" 5 "NODE_INIT_OK" 6 "MAIN_LOOP";
+VAL_TABLE_ VT_block_state 0 "OFF" 1 "INIT" 2 "READY" 3 "FAULT";
+
+BO_ 128 S0_GLOBAL_CONTROL: 8 MASTER
+ SG_ system_mode : 0|8@1+ (1,0) [0|255] "" MASTER,TOOL
+ SG_ control_flags : 8|8@1+ (1,0) [0|255] "bitfield" MASTER,TOOL
+ SG_ ctrl_drive_enable : 8|1@1+ (1,0) [0|1] "bool" MASTER,TOOL
+ SG_ ctrl_sync_enable : 9|1@1+ (1,0) [0|1] "bool" MASTER,TOOL
+ SG_ ctrl_estop : 10|1@1+ (1,0) [0|1] "bool" MASTER,TOOL
+ SG_ ctrl_diag_enable : 11|1@1+ (1,0) [0|1] "bool" MASTER,TOOL
+ SG_ base_rpm : 16|16@1+ (1,0) [0|10000] "rpm" MASTER,TOOL
+ SG_ sync_pos : 32|16@1+ (1.52587890625e-05,0) [0|0.9999847412109375] "rev" MASTER,TOOL
+ SG_ sequence : 48|8@1+ (1,0) [0|255] "" MASTER,TOOL
+ SG_ reserved : 56|8@1+ (1,0) [0|255] "" MASTER,TOOL
+
+BO_ 257 S0_NODE_CMD_1: 8 MASTER
+ SG_ node_command : 0|8@1+ (1,0) [0|255] "" MASTER,TOOL
+ SG_ node_flags : 8|8@1+ (1,0) [0|255] "bitfield" MASTER,TOOL
+ SG_ trim_rpm : 16|16@1- (0.1,0) [-3276.8|3276.7] "rpm" MASTER,TOOL
+ SG_ section_mask : 32|16@1+ (1,0) [0|65535] "bitmask" MASTER,TOOL
+ SG_ seq : 48|8@1+ (1,0) [0|255] "" MASTER,TOOL
+ SG_ reserved_cmd : 56|8@1+ (1,0) [0|255] "" MASTER,TOOL
+
+BO_ 321 S0_NODE_PRESENCE_1: 8 NODE1
+ SG_ seed_flags : 0|8@1+ (1,0) [0|255] "bitfield" NODE1,MASTER,TOOL
+ SG_ blockage_pct : 8|8@1+ (1,0) [0|100] "%" NODE1,MASTER,TOOL
+ SG_ slowdown_pct : 16|8@1+ (1,0) [0|100] "%" NODE1,MASTER,TOOL
+ SG_ skip_pct : 24|8@1+ (1,0) [0|100] "%" NODE1,MASTER,TOOL
+ SG_ double_pct : 32|8@1+ (1,0) [0|100] "%" NODE1,MASTER,TOOL
+ SG_ singulation_pct : 40|8@1+ (1,0) [0|100] "%" NODE1,MASTER,TOOL
+ SG_ population_x1k : 48|16@1+ (1,0) [0|65535] "x1000" NODE1,MASTER,TOOL
+
+BO_ 353 S0_NODE_DEBUG_DRV_1: 8 NODE1
+ SG_ drv_status1_raw : 0|8@1+ (1,0) [0|255] "" NODE1,MASTER,TOOL
+ SG_ drv_fault : 0|1@1+ (1,0) [0|1] "bool" NODE1,MASTER,TOOL
+ SG_ drv_gvdd_uv : 1|1@1+ (1,0) [0|1] "bool" NODE1,MASTER,TOOL
+ SG_ drv_pvdd_uv : 2|1@1+ (1,0) [0|1] "bool" NODE1,MASTER,TOOL
+ SG_ drv_otsd : 3|1@1+ (1,0) [0|1] "bool" NODE1,MASTER,TOOL
+ SG_ drv_otw : 4|1@1+ (1,0) [0|1] "bool" NODE1,MASTER,TOOL
+ SG_ drv_fetha_oc : 5|1@1+ (1,0) [0|1] "bool" NODE1,MASTER,TOOL
+ SG_ drv_fetla_oc : 6|1@1+ (1,0) [0|1] "bool" NODE1,MASTER,TOOL
+ SG_ drv_fethb_oc : 7|1@1+ (1,0) [0|1] "bool" NODE1,MASTER,TOOL
+ SG_ drv_status2_raw : 8|8@1+ (1,0) [0|255] "" NODE1,MASTER,TOOL
+ SG_ drv_gvdd_ov : 8|1@1+ (1,0) [0|1] "bool" NODE1,MASTER,TOOL
+ SG_ drv_device_id : 9|4@1+ (1,0) [0|15] "" NODE1,MASTER,TOOL
+ SG_ drv_status2_reserved : 13|3@1+ (1,0) [0|7] "" NODE1,MASTER,TOOL
+ SG_ drv_control1_raw : 16|8@1+ (1,0) [0|255] "" NODE1,MASTER,TOOL
+ SG_ drv_control1_hi : 24|8@1+ (1,0) [0|255] "" NODE1,MASTER,TOOL
+ SG_ drv_control2_raw : 32|8@1+ (1,0) [0|255] "" NODE1,MASTER,TOOL
+ SG_ drv_control2_hi : 40|8@1+ (1,0) [0|255] "" NODE1,MASTER,TOOL
+ SG_ drv_flags_debug : 48|8@1+ (1,0) [0|255] "bitfield" NODE1,MASTER,TOOL
+ SG_ drv_ctrl1_verify_ok : 48|1@1+ (1,0) [0|1] "bool" NODE1,MASTER,TOOL
+ SG_ drv_ctrl2_verify_ok : 49|1@1+ (1,0) [0|1] "bool" NODE1,MASTER,TOOL
+ SG_ drv_spi_ok : 50|1@1+ (1,0) [0|1] "bool" NODE1,MASTER,TOOL
+ SG_ drv_gate_enabled : 51|1@1+ (1,0) [0|1] "bool" NODE1,MASTER,TOOL
+ SG_ drv_nfault_active : 52|1@1+ (1,0) [0|1] "bool" NODE1,MASTER,TOOL
+ SG_ drv_flags_reserved : 53|3@1+ (1,0) [0|7] "" NODE1,MASTER,TOOL
+ SG_ drv_frame_marker : 56|8@1+ (1,0) [0|255] "" NODE1,MASTER,TOOL
+
+BO_ 385 S0_NODE_STATUS_FAST_1: 8 NODE1
+ SG_ status_flags : 0|8@1+ (1,0) [0|255] "bitfield" NODE1,MASTER,TOOL
+ SG_ run_allowed : 0|1@1+ (1,0) [0|1] "bool" NODE1,MASTER,TOOL
+ SG_ section_active : 1|1@1+ (1,0) [0|1] "bool" NODE1,MASTER,TOOL
+ SG_ reserved_status_2 : 2|1@1+ (1,0) [0|1] "" NODE1,MASTER,TOOL
+ SG_ app_fault_present : 3|1@1+ (1,0) [0|1] "bool" NODE1,MASTER,TOOL
+ SG_ sensor_ready : 4|1@1+ (1,0) [0|1] "bool" NODE1,MASTER,TOOL
+ SG_ driver_ready : 5|1@1+ (1,0) [0|1] "bool" NODE1,MASTER,TOOL
+ SG_ control_ready : 6|1@1+ (1,0) [0|1] "bool" NODE1,MASTER,TOOL
+ SG_ can_rx_seen : 7|1@1+ (1,0) [0|1] "bool" NODE1,MASTER,TOOL
+ SG_ error_code : 8|8@1+ (1,0) [0|255] "" NODE1,MASTER,TOOL
+ SG_ actual_rpm : 16|16@1+ (1,0) [0|10000] "rpm" NODE1,MASTER,TOOL
+ SG_ actual_pos : 32|16@1+ (1.52587890625e-05,0) [0|0.9999847412109375] "rev" NODE1,MASTER,TOOL
+ SG_ alive_counter : 48|8@1+ (1,0) [0|255] "" NODE1,MASTER,TOOL
+ SG_ sync_error : 56|8@1- (0.00390625,0) [-0.5|0.49609375] "rev" NODE1,MASTER,TOOL
+
+BO_ 481 S0_NODE_MOTOR_DEBUG_1: 8 NODE1
+ SG_ target_rpm_debug : 0|16@1+ (1,0) [0|10000] "rpm" NODE1,MASTER,TOOL
+ SG_ actual_rpm_debug : 16|16@1- (1,0) [-32768|32767] "rpm" NODE1,MASTER,TOOL
+ SG_ target_rad_s_x10_debug : 32|16@1- (0.1,0) [-3276.8|3276.7] "rad/s" NODE1,MASTER,TOOL
+ SG_ hall_raw_debug : 48|8@1+ (1,0) [0|7] "bitfield" NODE1,MASTER,TOOL
+ SG_ motor_flags_debug : 56|8@1+ (1,0) [0|255] "bitfield" NODE1,MASTER,TOOL
+ SG_ motor_run_allowed_debug : 56|1@1+ (1,0) [0|1] "bool" NODE1,MASTER,TOOL
+ SG_ motor_fault_active_debug : 57|1@1+ (1,0) [0|1] "bool" NODE1,MASTER,TOOL
+ SG_ motor_global_fresh_debug : 58|1@1+ (1,0) [0|1] "bool" NODE1,MASTER,TOOL
+ SG_ motor_node_fresh_debug : 59|1@1+ (1,0) [0|1] "bool" NODE1,MASTER,TOOL
+ SG_ motor_section_active_debug : 60|1@1+ (1,0) [0|1] "bool" NODE1,MASTER,TOOL
+
+BO_ 449 S0_NODE_DIAG_1: 8 NODE1
+ SG_ bus_voltage : 0|16@1+ (0.1,0) [0|6553.5] "V" NODE1,MASTER,TOOL
+ SG_ motor_current : 16|16@1- (0.1,0) [-3276.8|3276.7] "A" NODE1,MASTER,TOOL
+ SG_ controller_temp : 32|8@1+ (1,0) [0|255] "C" NODE1,MASTER,TOOL
+ SG_ motor_temp : 40|8@1+ (1,0) [0|255] "C" NODE1,MASTER,TOOL
+ SG_ drv_status1_diag : 48|8@1+ (1,0) [0|255] "" NODE1,MASTER,TOOL
+ SG_ warning_flags : 56|8@1+ (1,0) [0|255] "bitfield" NODE1,MASTER,TOOL
+ SG_ debug_stage_diag : 56|4@1+ (1,0) [0|15] "" NODE1,MASTER,TOOL
+ SG_ sensor_state_diag : 60|2@1+ (1,0) [0|3] "" NODE1,MASTER,TOOL
+ SG_ driver_state_diag : 62|2@1+ (1,0) [0|3] "" NODE1,MASTER,TOOL
+
+VAL_ 128 system_mode 0 "OFF" 1 "MANUAL" 2 "AUTO" 3 "CALIBRATION" 4 "FAULT_HOLD" ;
+VAL_ 257 node_command 0 "NOP" 1 "ENABLE" 2 "DISABLE" 3 "ZERO_POS" 4 "CLEAR_FAULT" ;
+VAL_ 353 app_fault_code_debug 0 "NONE" 1 "CLOCK" 2 "FDCAN_INIT" 3 "FDCAN_START" 4 "CAN_TX" 5 "CAN_RX" 6 "SENSOR_INIT" 7 "SENSOR_READ" 8 "DRIVER_INIT" 9 "MOTOR_CONTROL" 10 "DRIVER_SPI_VERIFY" 11 "DRIVER_SPI_VERIFY_CTRL1" ;
+VAL_ 353 debug_stage_debug 0 "RESET" 1 "CLOCK_OK" 2 "GPIO_OK" 3 "FDCAN_INIT_OK" 4 "FDCAN_START_OK" 5 "NODE_INIT_OK" 6 "MAIN_LOOP" ;
+VAL_ 353 driver_block_state_debug 0 "OFF" 1 "INIT" 2 "READY" 3 "FAULT" ;
+VAL_ 385 error_code 0 "NONE" 1 "CLOCK" 2 "FDCAN_INIT" 3 "FDCAN_START" 4 "CAN_TX" 5 "CAN_RX" 6 "SENSOR_INIT" 7 "SENSOR_READ" 8 "DRIVER_INIT" 9 "MOTOR_CONTROL" 10 "DRIVER_SPI_VERIFY" 11 "DRIVER_SPI_VERIFY_CTRL1" ;
+VAL_ 449 debug_stage_diag 0 "RESET" 1 "CLOCK_OK" 2 "GPIO_OK" 3 "FDCAN_INIT_OK" 4 "FDCAN_START_OK" 5 "NODE_INIT_OK" 6 "MAIN_LOOP" ;
+VAL_ 449 sensor_state_diag 0 "OFF" 1 "INIT" 2 "READY" 3 "FAULT" ;
+VAL_ 449 driver_state_diag 0 "OFF" 1 "INIT" 2 "READY" 3 "FAULT" ;
+
+CM_ BO_ 353 "Raw DRV8301 register dump on CAN ID 0x161: STATUS1_L, STATUS2_L, CONTROL1_L, CONTROL1_H, CONTROL2_L, CONTROL2_H, FLAGS, MARKER.";
+CM_ SG_ 353 drv_status1_raw "Raw low byte of DRV8301 STATUS1.";
+CM_ SG_ 353 drv_status2_raw "Raw low byte of DRV8301 STATUS2.";
+CM_ SG_ 353 drv_control1_raw "Raw low byte of DRV8301 CONTROL1.";
+CM_ SG_ 353 drv_control1_hi "Raw high byte of DRV8301 CONTROL1.";
+CM_ SG_ 353 drv_control2_raw "Raw low byte of DRV8301 CONTROL2.";
+CM_ SG_ 353 drv_control2_hi "Raw high byte of DRV8301 CONTROL2.";
+CM_ SG_ 353 drv_flags_debug "Flags byte: bit0 ctrl1 verify, bit1 ctrl2 verify, bit2 spi ok, bit3 gate enabled, bit4 nFAULT active.";
+CM_ SG_ 353 drv_ctrl1_verify_ok "Control1 write-readback verify bit.";
+CM_ SG_ 353 drv_ctrl2_verify_ok "Control2 write-readback verify bit.";
+CM_ SG_ 353 drv_spi_ok "SPI transaction path currently OK.";
+CM_ SG_ 353 drv_gate_enabled "EN_GATE currently enabled by firmware.";
+CM_ SG_ 353 drv_nfault_active "nFAULT pin is active low, so 1 means fault pin is low.";
+CM_ SG_ 353 drv_frame_marker "Constant 0xA5 marker for the raw debug frame layout.";
+CM_ BO_ 481 "PlatformIO/SimpleFOC motor debug frame replacing USB serial bringup telemetry.";
+CM_ SG_ 481 motor_flags_debug "bit0 run_allowed, bit1 nFAULT active, bit2 global control fresh, bit3 node command fresh, bit4 section active";
+CM_ SG_ 481 hall_raw_debug "Raw Hall pin state: bit0 HallA/PB6, bit1 HallB/PB7, bit2 HallC/PB11";

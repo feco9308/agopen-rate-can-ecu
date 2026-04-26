@@ -18,6 +18,7 @@ static constexpr uint16_t PGN_ECU_DIAG_NODE_SUMMARY= 32808;
 static constexpr uint16_t PGN_ECU_DIAG_NODE_DETAIL_A = 32809;
 static constexpr uint16_t PGN_ECU_DIAG_NODE_DETAIL_B = 32810;
 static constexpr uint16_t PGN_ECU_DIAG_NODE_DETAIL_REQ = 32811;
+static constexpr uint16_t PGN_ECU_DIAG_NODE_DETAIL_C = 32812;
 static constexpr uint16_t PGN_NODE_DISCOVER         = 32900;
 static constexpr uint16_t PGN_NODE_UID_A            = 32901;
 static constexpr uint16_t PGN_NODE_UID_B            = 32902;
@@ -43,6 +44,7 @@ enum : uint8_t {
     CFG_BLOCK_CHANNEL = 3,
     CFG_BLOCK_NETWORK = 4,
     CFG_BLOCK_MONITOR = 5,
+    CFG_BLOCK_RATE_APP = 6,
     CFG_BLOCK_PLANTER = CFG_BLOCK_MONITOR
 };
 

@@ -25,6 +25,7 @@ static constexpr uint8_t STATUS_PURPLE = 3;
 
 void buildPacket(uint8_t pgn, const uint8_t payload[8], uint8_t out[14]);
 uint32_t estimatePopulation(uint32_t target_population, float target_rpm, float actual_rpm);
+uint32_t populationFromNode(const NodeRuntimeState& node_state, uint32_t target_population, float target_rpm, float actual_rpm);
 uint8_t estimateRowStatus(bool section_enabled, const NodeRuntimeState& node_state, float target_rpm);
 
 } // namespace planter_output

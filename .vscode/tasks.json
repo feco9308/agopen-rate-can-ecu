@@ -1,0 +1,38 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "stm32g-node: configure",
+      "type": "shell",
+      "command": "cmake",
+      "args": [
+        "--preset",
+        "stm32g431-debug"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/firmware/stm32g-node"
+      },
+      "problemMatcher": "$gcc",
+      "group": "build"
+    },
+    {
+      "label": "stm32g-node: build",
+      "type": "shell",
+      "command": "cmake",
+      "args": [
+        "--build",
+        "--preset",
+        "stm32g431-debug"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/firmware/stm32g-node"
+      },
+      "problemMatcher": "$gcc",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "dependsOn": "stm32g-node: configure"
+    }
+  ]
+}

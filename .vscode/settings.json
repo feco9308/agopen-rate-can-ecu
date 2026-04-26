@@ -1,0 +1,21 @@
+{
+  "C_Cpp.intelliSenseEngine": "disabled",
+  "C_Cpp.errorSquiggles": "disabled",
+  "C_Cpp.autocomplete": "disabled",
+  "C_Cpp.formatting": "disabled",
+  "cmake.useCMakePresets": "always",
+  "cmake.configureOnOpen": false,
+  "cmake.sourceDirectory": "${workspaceFolder}/firmware/stm32g-node",
+  "cmake.buildDirectory": "${workspaceFolder}/firmware/stm32g-node/build/${buildType}",
+  "clangd.arguments": [
+    "--background-index",
+    "--compile-commands-dir=${workspaceFolder}/firmware/stm32g-node/build/Debug",
+    "--header-insertion=never",
+    "--clang-tidy"
+  ],
+  "files.associations": {
+    "fdcan.h": "c",
+    "stm32g4xx_hal.h": "c",
+    "stm32g4xx_hal_fdcan.h": "c"
+  }
+}

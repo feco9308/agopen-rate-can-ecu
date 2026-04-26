@@ -88,6 +88,11 @@ enum class MonitorOutputMode : uint8_t {
     BLOCKAGE = 2
 };
 
+enum class RateAppMode : uint8_t {
+    LEGACY = 0,
+    SK21 = 1
+};
+
 enum NodeCommandCode : uint8_t {
     NODE_CMD_NOP         = 0,
     NODE_CMD_ENABLE      = 1,
@@ -100,6 +105,13 @@ enum NodeCommandFlags : uint8_t {
     NODE_FLAG_ALLOW_RUN       = 1 << 0,
     NODE_FLAG_INVERT_DIR      = 1 << 1,
     NODE_FLAG_USE_LOCAL_SENSOR= 1 << 2
+};
+
+enum SeedMonitorFlags : uint8_t {
+    SEED_FLAG_VALID        = 1 << 0,
+    SEED_FLAG_BLOCKED      = 1 << 1,
+    SEED_FLAG_SLOWED       = 1 << 2,
+    SEED_FLAG_SENSOR_FAULT = 1 << 3
 };
 
 struct GlobalControlFrame {
@@ -138,6 +150,16 @@ struct NodeDiagFrame {
     uint8_t warning_flags;
 };
 
+struct NodePresenceFrame {
+    uint8_t seed_flags;
+    uint8_t blockage_pct;
+    uint8_t slowdown_pct;
+    uint8_t skip_pct;
+    uint8_t double_pct;
+    uint8_t singulation_pct;
+    uint16_t population_x1k_u16;
+};
+
 struct NodeRuntimeState {
     bool online = false;
     uint32_t last_seen_ms = 0;
@@ -153,4 +175,11 @@ struct NodeRuntimeState {
     uint8_t motor_temp = 0;
     uint8_t fault_flags = 0;
     uint8_t warning_flags = 0;
+    uint8_t seed_flags = 0;
+    uint8_t blockage_pct = 0;
+    uint8_t slowdown_pct = 0;
+    uint8_t skip_pct = 0;
+    uint8_t double_pct = 0;
+    uint8_t singulation_pct = 100;
+    uint16_t population_x1k = 0;
 };

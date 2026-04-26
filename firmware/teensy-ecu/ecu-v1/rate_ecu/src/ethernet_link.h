@@ -35,6 +35,7 @@ private:
     void sendDiagNodeSummary(uint8_t sensorIndex, const EcuState& ecu, const NodeManager& nodeManager);
     void sendDiagNodeDetailA(uint8_t sensorIndex, uint8_t nodeId, const NodeRuntimeState& nodeState);
     void sendDiagNodeDetailB(uint8_t sensorIndex, uint8_t nodeId, const NodeRuntimeState& nodeState);
+    void sendDiagNodeDetailC(uint8_t sensorIndex, uint8_t nodeId, const NodeRuntimeState& nodeState);
     void sendDiagNodeDetails(const NodeManager* nodeManagers,
                              uint8_t sensorCount,
                              uint8_t sensorMask,
@@ -63,6 +64,7 @@ private:
     uint8_t diag_sensor_mask_ = 0x0F;
     uint16_t diag_node_mask_ = 0xFFFF;
 
+    uint8_t ino_type_ = 0;
     uint16_t ino_id_ = 0x0001;
     bool good_pins_ = true;
 };

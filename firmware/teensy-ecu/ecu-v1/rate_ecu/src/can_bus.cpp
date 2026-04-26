@@ -204,6 +204,49 @@ void CanBus::handleFrame(const CAN_message_t& msg, NodeManager* nodeManagers, ui
 
             return;
         }
+
+        if (id >= (profile.node_pres_base + 1u) &&
+            id < (profile.node_pres_base + cfg::NODE_COUNT_MAX + 1u) &&
+            msg.len == 8) {
+
+            const uint8_t nodeId = static_cast<uint8_t>(id - profile.node_pres_base);
+
+            NodePresenceFrame frame{};
+            frame.seed_flags = msg.buf[0];
+            frame.blockage_pct = msg.buf[1];
+            frame.slowdown_pct = msg.buf[2];
+            frame.skip_pct = msg.buf[3];
+            frame.double_pct = msg.buf[4];
+            frame.singulation_pct = msg.buf[5];
+            frame.population_x1k_u16 = static_cast<uint16_t>(msg.buf[6] | (msg.buf[7] << 8));
+
+            nodeManagers[channelIndex].onPresenceFrame(nodeId, frame);
+
+            if (CAN_RX_DEBUG) {
+                Serial.print("[CAN RX] ch=");
+                Serial.print(channelIndex);
+                Serial.print(" NODE_PRESENCE id=0x");
+                Serial.print(id, HEX);
+                Serial.print(" node=");
+                Serial.print(nodeId);
+                Serial.print(" flags=0x");
+                Serial.print(frame.seed_flags, HEX);
+                Serial.print(" blockage=");
+                Serial.print(frame.blockage_pct);
+                Serial.print(" slowdown=");
+                Serial.print(frame.slowdown_pct);
+                Serial.print(" skip=");
+                Serial.print(frame.skip_pct);
+                Serial.print(" double=");
+                Serial.print(frame.double_pct);
+                Serial.print(" singulation=");
+                Serial.print(frame.singulation_pct);
+                Serial.print(" pop_k=");
+                Serial.println(frame.population_x1k_u16);
+            }
+
+            return;
+        }
     }
 }
 

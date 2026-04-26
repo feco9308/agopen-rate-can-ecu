@@ -167,6 +167,10 @@ bool EthernetLink::processUdpPacket(EcuState* ecus,
                     module_id_ = runtime_cfg::moduleId();
                     break;
 
+                case custom_pgn::CFG_BLOCK_RATE_APP:
+                    runtime_cfg::setRateAppMode(data[4]);
+                    break;
+
                 case custom_pgn::CFG_BLOCK_CHANNEL:
                     runtime_cfg::setDriveRatio(index, static_cast<float>(data[4] | (data[5] << 8)) / 100.0f);
                     runtime_cfg::setMotorRatio(index, static_cast<float>(data[6] | (data[7] << 8)) / 100.0f);
@@ -492,6 +496,10 @@ bool EthernetLink::processUdpPacket(EcuState* ecus,
 
             runtime_cfg::setModuleId(p.module_id);
             module_id_ = p.module_id;
+            if (runtime_cfg::rateAppMode() == static_cast<uint8_t>(RateAppMode::SK21)) {
+                runtime_cfg::setActiveSensorCount(p.sensor_count);
+                applyRuntimeConfigToEcus(ecus);
+            }
             sensor_count_ = runtime_cfg::activeSensorCount();
 
             if (ETH_DEBUG_RX) {
@@ -636,6 +644,10 @@ void EthernetLink::sendConfigStatus(uint8_t block_id, uint8_t index, const EcuSt
             payload[5] = module_id_;
             break;
 
+        case custom_pgn::CFG_BLOCK_RATE_APP:
+            payload[2] = runtime_cfg::rateAppMode();
+            break;
+
         case custom_pgn::CFG_BLOCK_MONITOR:
             if (index == 0) {
                 payload[2] = runtime_cfg::monitorOutputEnabled() ? 1 : 0;
@@ -766,6 +778,20 @@ void EthernetLink::sendDiagNodeDetailB(uint8_t sensorIndex, uint8_t nodeId, cons
     sendCustomPacket(custom_pgn::PGN_ECU_DIAG_NODE_DETAIL_B, payload);
 }
 
+void EthernetLink::sendDiagNodeDetailC(uint8_t sensorIndex, uint8_t nodeId, const NodeRuntimeState& nodeState) {
+    uint8_t payload[8]{};
+    payload[0] = sensorIndex;
+    payload[1] = nodeId;
+    payload[2] = nodeState.seed_flags;
+    payload[3] = nodeState.blockage_pct;
+    payload[4] = nodeState.slowdown_pct;
+    payload[5] = nodeState.skip_pct;
+    payload[6] = nodeState.double_pct;
+    payload[7] = nodeState.singulation_pct;
+
+    sendCustomPacket(custom_pgn::PGN_ECU_DIAG_NODE_DETAIL_C, payload);
+}
+
 void EthernetLink::sendDiagNodeDetails(const NodeManager* nodeManagers,
                                        uint8_t sensorCount,
                                        uint8_t sensorMask,
@@ -784,6 +810,7 @@ void EthernetLink::sendDiagNodeDetails(const NodeManager* nodeManagers,
             const NodeRuntimeState& nodeState = nodeManagers[sensorIndex].node(nodeId);
             sendDiagNodeDetailA(sensorIndex, nodeId, nodeState);
             sendDiagNodeDetailB(sensorIndex, nodeId, nodeState);
+            sendDiagNodeDetailC(sensorIndex, nodeId, nodeState);
         }
     }
 }
@@ -814,20 +841,35 @@ void EthernetLink::sendPlanterOutput(const EcuState* ecus, const NodeManager* no
     uint16_t overrideMask = 0;
     uint32_t populationSum = 0;
     uint8_t activeRows = 0;
+    uint32_t skipSum = 0;
+    uint32_t doubleSum = 0;
+    uint32_t singulationSum = 0;
+    uint8_t qualityRows = 0;
+    uint8_t rowSkips[cfg::NODE_COUNT_MAX]{};
+    uint8_t rowDoubles[cfg::NODE_COUNT_MAX]{};
 
     for (uint8_t nodeId = 1; nodeId <= planterRows; ++nodeId) {
         const bool sectionEnabled = ecu.sectionEnabled(nodeId);
         const NodeRuntimeState& nodeState = nodeManager.node(nodeId);
         const float targetRpm = sectionEnabled ? ecu.baseRpm() : 0.0f;
-        rowPopulation[nodeId - 1] = planter_output::estimatePopulation(
+        rowPopulation[nodeId - 1] = planter_output::populationFromNode(
+            nodeState,
             runtime_cfg::planterTargetPopulation(),
             targetRpm,
             nodeState.actual_rpm
         );
+        rowSkips[nodeId - 1] = ((nodeState.seed_flags & SEED_FLAG_VALID) != 0) ? nodeState.skip_pct : 0u;
+        rowDoubles[nodeId - 1] = ((nodeState.seed_flags & SEED_FLAG_VALID) != 0) ? nodeState.double_pct : 0u;
 
         if (sectionEnabled) {
             populationSum += rowPopulation[nodeId - 1];
             ++activeRows;
+            if ((nodeState.seed_flags & SEED_FLAG_VALID) != 0) {
+                skipSum += nodeState.skip_pct;
+                doubleSum += nodeState.double_pct;
+                singulationSum += nodeState.singulation_pct;
+                ++qualityRows;
+            }
         } else {
             overrideMask |= static_cast<uint16_t>(1u << (nodeId - 1u));
         }
@@ -885,8 +927,15 @@ void EthernetLink::sendPlanterOutput(const EcuState* ecus, const NodeManager* no
     {
         uint8_t payload[8]{};
         uint8_t packet[14]{};
+        for (uint8_t i = 0; i < 8; ++i) {
+            payload[i] = rowDoubles[i];
+        }
         planter_output::buildPacket(planter_output::PGN_DOUBLES, payload, packet);
         sendMonitorPacket(planter_output::UDP_PORT, packet, sizeof(packet));
+        memset(payload, 0, sizeof(payload));
+        for (uint8_t i = 0; i < 8; ++i) {
+            payload[i] = rowSkips[i];
+        }
         planter_output::buildPacket(planter_output::PGN_SKIPS, payload, packet);
         sendMonitorPacket(planter_output::UDP_PORT, packet, sizeof(packet));
     }
@@ -897,13 +946,21 @@ void EthernetLink::sendPlanterOutput(const EcuState* ecus, const NodeManager* no
         const uint16_t summaryPopulationD10 = static_cast<uint16_t>(
             clampValue<uint32_t>(summaryPopulation / 10u, 0u, 65535u)
         );
-        const uint16_t singulationX10 = 1000u;
+        const uint16_t skipX10 = static_cast<uint16_t>(
+            clampValue<uint32_t>((qualityRows > 0 ? (skipSum * 10u) / qualityRows : 0u), 0u, 1000u)
+        );
+        const uint16_t doubleX10 = static_cast<uint16_t>(
+            clampValue<uint32_t>((qualityRows > 0 ? (doubleSum * 10u) / qualityRows : 0u), 0u, 1000u)
+        );
+        const uint16_t singulationX10 = static_cast<uint16_t>(
+            clampValue<uint32_t>((qualityRows > 0 ? (singulationSum * 10u) / qualityRows : 1000u), 0u, 1000u)
+        );
         payload[0] = static_cast<uint8_t>(summaryPopulationD10 & 0xFF);
         payload[1] = static_cast<uint8_t>((summaryPopulationD10 >> 8) & 0xFF);
-        payload[2] = 0;
-        payload[3] = 0;
-        payload[4] = 0;
-        payload[5] = 0;
+        payload[2] = static_cast<uint8_t>(skipX10 & 0xFF);
+        payload[3] = static_cast<uint8_t>((skipX10 >> 8) & 0xFF);
+        payload[4] = static_cast<uint8_t>(doubleX10 & 0xFF);
+        payload[5] = static_cast<uint8_t>((doubleX10 >> 8) & 0xFF);
         payload[6] = static_cast<uint8_t>(singulationX10 & 0xFF);
         payload[7] = static_cast<uint8_t>((singulationX10 >> 8) & 0xFF);
         planter_output::buildPacket(planter_output::PGN_SUMMARY, payload, packet);
@@ -957,11 +1014,19 @@ void EthernetLink::sendBlockageOutput(const EcuState* ecus, const NodeManager* n
         const EcuState& ecu = ecus[sensorIndex];
         const NodeRuntimeState& nodeState = nodeManagers[sensorIndex].node(nodeId);
         const float targetRpm = ecu.sectionEnabled(nodeId) ? ecu.baseRpm() : 0.0f;
-        const uint8_t rateByte = blockage_output::estimateRateByte(
+        uint8_t rateByte = blockage_output::estimateRateByte(
             runtime_cfg::planterTargetPopulation(),
             targetRpm,
             nodeState.actual_rpm
         );
+        if ((nodeState.seed_flags & SEED_FLAG_VALID) != 0) {
+            if ((nodeState.seed_flags & SEED_FLAG_BLOCKED) != 0 ||
+                nodeState.blockage_pct >= runtime_cfg::blockageThreshold()) {
+                rateByte = 0;
+            } else if (nodeState.population_x1k > 0) {
+                rateByte = static_cast<uint8_t>(min<uint16_t>(255u, nodeState.population_x1k));
+            }
+        }
         const uint8_t moduleId = static_cast<uint8_t>(globalRow / rowsPerModule);
         const uint8_t rowInModule = static_cast<uint8_t>(globalRow % rowsPerModule);
         uint8_t packet[5]{};
@@ -1014,6 +1079,7 @@ void EthernetLink::sendStatus(const EcuState* ecus, const NodeManager* nodeManag
     }
     last_status_tx_ms_ = now;
 
+    const bool sk21_mode = runtime_cfg::rateAppMode() == static_cast<uint8_t>(RateAppMode::SK21);
     const EcuState& ecu = ecus[0];
     uint8_t data[20]{};
 
@@ -1037,21 +1103,20 @@ void EthernetLink::sendStatus(const EcuState* ecus, const NodeManager* nodeManag
     data[9]  = static_cast<uint8_t>(pwm_like & 0xFF);
     data[10] = static_cast<uint8_t>((pwm_like >> 8) & 0xFF);
 
-    data[11] = 0;
-    if (nodeManagers[0].hasOnlineNode(ecu)) {
-        data[11] |= 0b00000001;
-    }
-    if (Ethernet.linkStatus() == LinkON) {
-        data[11] |= 0b01000000;
-    }
-    if (good_pins_) {
-        data[11] |= 0b10000000;
-    }
-
-    data[12] = legacy_rate::crc(data, 12, 0);
+    data[11] = nodeManagers[0].hasOnlineNode(ecu) ? 0b00000001 : 0;
+    const float actual_disc_rpm0 = (ecu.combinedRatio() > 0.0f)
+        ? (nodeManagers[0].averageActualRpm(ecu) / ecu.combinedRatio())
+        : 0.0f;
+    const uint16_t sensor_hz_x10_0 = clampValue<uint32_t>(
+        static_cast<uint32_t>((actual_disc_rpm0 * ecu.holesPerRev() * 10.0f / 60.0f) + 0.5f),
+        0u, 65535u
+    );
+    data[12] = static_cast<uint8_t>(sensor_hz_x10_0 & 0xFF);
+    data[13] = static_cast<uint8_t>((sensor_hz_x10_0 >> 8) & 0xFF);
+    data[14] = legacy_rate::crc(data, 14, 0);
 
     udp_.beginPacket(destination_ip_, legacy_rate::UDP_DEST_PORT);
-    udp_.write(data, 13);
+    udp_.write(data, 15);
     udp_.endPacket();
 
     for (uint8_t sensorId = 1; sensorId < sensorCount; ++sensorId) {
@@ -1076,20 +1141,20 @@ void EthernetLink::sendStatus(const EcuState* ecus, const NodeManager* nodeManag
         data[9]  = static_cast<uint8_t>(pwm_like_sensor & 0xFF);
         data[10] = static_cast<uint8_t>((pwm_like_sensor >> 8) & 0xFF);
 
-        if (nodeManagers[sensorId].hasOnlineNode(sensorEcu)) {
-            data[11] |= 0b00000010;
-        }
-        if (Ethernet.linkStatus() == LinkON) {
-            data[11] |= 0b01000000;
-        }
-        if (good_pins_) {
-            data[11] |= 0b10000000;
-        }
-
-        data[12] = legacy_rate::crc(data, 12, 0);
+        data[11] = nodeManagers[sensorId].hasOnlineNode(sensorEcu) ? 0b00000001 : 0;
+        const float actual_disc_rpm = (sensorEcu.combinedRatio() > 0.0f)
+            ? (nodeManagers[sensorId].averageActualRpm(sensorEcu) / sensorEcu.combinedRatio())
+            : 0.0f;
+        const uint16_t sensor_hz_x10 = clampValue<uint32_t>(
+            static_cast<uint32_t>((actual_disc_rpm * sensorEcu.holesPerRev() * 10.0f / 60.0f) + 0.5f),
+            0u, 65535u
+        );
+        data[12] = static_cast<uint8_t>(sensor_hz_x10 & 0xFF);
+        data[13] = static_cast<uint8_t>((sensor_hz_x10 >> 8) & 0xFF);
+        data[14] = legacy_rate::crc(data, 14, 0);
 
         udp_.beginPacket(destination_ip_, legacy_rate::UDP_DEST_PORT);
-        udp_.write(data, 13);
+        udp_.write(data, 15);
         udp_.endPacket();
     }
 
@@ -1097,9 +1162,17 @@ void EthernetLink::sendStatus(const EcuState* ecus, const NodeManager* nodeManag
     data[0] = 145;
     data[1] = 126;
     data[2] = module_id_;
+    data[10] = sk21_mode ? ino_type_ : 0;
     data[11] = static_cast<uint8_t>(ino_id_ & 0xFF);
     data[12] = static_cast<uint8_t>((ino_id_ >> 8) & 0xFF);
-    data[13] = 0;
+    if (sk21_mode) {
+        if (Ethernet.linkStatus() == LinkON) {
+            data[13] |= 0b00010000;
+        }
+        if (good_pins_) {
+            data[13] |= 0b00100000;
+        }
+    }
     data[14] = legacy_rate::crc(data, 14, 0);
 
     udp_.beginPacket(destination_ip_, legacy_rate::UDP_DEST_PORT);
