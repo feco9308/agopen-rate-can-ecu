@@ -28,6 +28,8 @@ const char* selectedModeName() {
       return "TEST_6STEP";
     case config::TEST_SIMPLEFOC_OPENLOOP:
       return "TEST_SIMPLEFOC_OPENLOOP";
+    case config::TEST_SIMPLEFOC_OPENLOOP_DEBUG:
+      return "TEST_SIMPLEFOC_OPENLOOP_DEBUG";
     case config::TEST_SIMPLEFOC_CLOSEDLOOP:
       return "TEST_SIMPLEFOC_CLOSEDLOOP";
     default:
@@ -67,6 +69,7 @@ void setup() {
     case config::TEST_PHASE_CHECK:
     case config::TEST_6STEP:
     case config::TEST_SIMPLEFOC_OPENLOOP:
+    case config::TEST_SIMPLEFOC_OPENLOOP_DEBUG:
     case config::TEST_SIMPLEFOC_CLOSEDLOOP:
       motor_test::begin(DebugSerial);
       break;
@@ -87,6 +90,7 @@ void loop() {
     case config::TEST_PHASE_CHECK:
     case config::TEST_6STEP:
     case config::TEST_SIMPLEFOC_OPENLOOP:
+    case config::TEST_SIMPLEFOC_OPENLOOP_DEBUG:
     case config::TEST_SIMPLEFOC_CLOSEDLOOP:
       motor_test::update(DebugSerial);
       break;

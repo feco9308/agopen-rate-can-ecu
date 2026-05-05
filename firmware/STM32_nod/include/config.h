@@ -13,6 +13,7 @@ enum TestMode : uint8_t {
   TEST_PHASE_CHECK,
   TEST_6STEP,
   TEST_SIMPLEFOC_OPENLOOP,
+  TEST_SIMPLEFOC_OPENLOOP_DEBUG,
   TEST_SIMPLEFOC_CLOSEDLOOP
 };
 
@@ -26,6 +27,8 @@ constexpr uint32_t kDriverEnableDelayMs = 1500;
 constexpr uint32_t kDriverSpiReadbackIntervalMs = 500;
 constexpr uint32_t kSixStepEnableDelayMs = 1500;
 constexpr uint32_t kSixStepStatusIntervalMs = 250;
+constexpr uint32_t kSixStepStartupKickMs = 400;
+constexpr uint32_t kSixStepStartupStepMs = 35;
 constexpr uint32_t kPhaseCheckEnableDelayMs = 1500;
 constexpr uint32_t kPhaseCheckHoldMs = 1800;
 constexpr uint32_t kPhaseCheckStatusIntervalMs = 250;
@@ -38,16 +41,16 @@ constexpr uint32_t kSimpleFocEnableDelayMs = 1500;
 constexpr uint32_t kSimpleFocStatusIntervalMs = 250;
 constexpr bool kSimpleFocLogHallChanges = true;
 constexpr float kSimpleFocClosedloopTargetRpm = 120.0f;
-constexpr float kSimpleFocClosedloopVoltageLimit = 1.20f;
-constexpr float kSimpleFocClosedloopVelocityLimit = 180.0f;
+constexpr float kSimpleFocClosedloopVoltageLimit = 1.4f;
+constexpr float kSimpleFocClosedloopVelocityLimit = 400.0f;
 constexpr bool kSimpleFocClosedloopReverse = false;
-constexpr float kSimpleFocClosedloopVelP = 0.02f;
-constexpr float kSimpleFocClosedloopVelI = 0.08f;
+constexpr float kSimpleFocClosedloopVelP = 0.008f;
+constexpr float kSimpleFocClosedloopVelI = 0.02f;
 constexpr float kSimpleFocClosedloopVelD = 0.0f;
-constexpr float kSimpleFocClosedloopVelLpfTf = 0.12f;
+constexpr float kSimpleFocClosedloopVelLpfTf = 0.25f;
 constexpr bool kSimpleFocClosedloopUseStartupAssist = true;
 constexpr uint32_t kSimpleFocClosedloopStartupMs = 1500;
-constexpr float kSimpleFocClosedloopStartupRpm = 120.0f;
+constexpr float kSimpleFocClosedloopStartupRpm = 50.0f;
 
 constexpr uint32_t kDebugTxPin = PA2;
 constexpr uint32_t kDebugRxPin = PA3;
@@ -71,8 +74,15 @@ constexpr uint32_t kDrvSdiPin = PA7;
 constexpr float kBusVoltage = 12.0f;
 constexpr float kPwmLimit = 0.10f;
 constexpr float kVoltageLimit = 0.50f;
-constexpr float kSimpleFocOpenloopTargetRpm = 40.0f;
-constexpr float kSimpleFocOpenloopVoltageLimit = 1.00f;
+constexpr float kSimpleFocOpenloopTargetRpm = 60.0f;
+constexpr float kSimpleFocOpenloopVoltageLimit = 1.20f;
+constexpr float kSimpleFocOpenloopStartupRpm = 20.0f;
+constexpr float kSimpleFocOpenloopStartupVoltageLimit = 1.20f;
+constexpr uint32_t kSimpleFocOpenloopStartupHoldMs = 1500;
+constexpr uint32_t kSimpleFocOpenloopRampMs = 4000;
+constexpr float kSimpleFocOpenloopDebugVoltage = 1.35f;
+constexpr float kSimpleFocOpenloopDebugStepDeg = 10.0f;
+constexpr uint32_t kSimpleFocOpenloopDebugStepMs = 50;
 constexpr bool kDrvUse3PwmMode = true;
 constexpr uint8_t kDrvGateCurrentCode = 0;   // 0=1.7A, 1=0.7A, 2=0.25A
 constexpr uint8_t kDrvOcpModeCode = 0;       // 0=current limit, 1=latch shutdown, 2=report only, 3=disabled
@@ -87,6 +97,7 @@ constexpr bool kInvertMotorDirection = false;
 constexpr bool kDriverEnableAutoStart = true;
 constexpr bool kDriverSpiAutoConfigure = true;
 constexpr uint8_t kSixStepPwmDuty = 24;
+constexpr uint8_t kSixStepStartupPwmDuty = 32;
 constexpr uint8_t kPhaseCheckPwmDuty = 20;
 constexpr uint8_t kDrvSpiStabilityPwmDuty = 16;
 constexpr bool kSixStepReverseDirection = false;

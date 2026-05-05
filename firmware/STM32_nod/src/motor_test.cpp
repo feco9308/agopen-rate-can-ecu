@@ -78,17 +78,52 @@ enum Drv8301Control2Bits : uint16_t {
 };
 
 bool g_driver_enabled = false;
+bool g_drv_configured = false;
 bool g_fault_latched = false;
 bool g_openloop_started = false;
+bool g_openloop_debug_started = false;
 bool g_closedloop_started = false;
 bool g_closedloop_startup_active = false;
 bool g_drv_spi_stage_pwm = false;
+bool g_sixstep_startup_active = false;
 uint8_t g_step_index = 0;
 uint8_t g_last_hall_state = 0xFF;
 uint32_t g_boot_ms = 0;
 uint32_t g_last_print_ms = 0;
 uint32_t g_last_phase_change_ms = 0;
+uint32_t g_sixstep_enable_ms = 0;
+uint32_t g_sixstep_last_kick_ms = 0;
 uint32_t g_closedloop_enable_ms = 0;
+uint32_t g_openloop_enable_ms = 0;
+uint32_t g_openloop_debug_step_ms = 0;
+uint32_t g_openloop_step_interval_ms = 0;
+float g_openloop_debug_angle_el = 0.0f;
+float g_openloop_debug_voltage = 0.0f;
+float g_openloop_target_rad_s = 0.0f;
+bool g_openloop_move_called = false;
+uint8_t g_sixstep_current_duty = config::kSixStepPwmDuty;
+bool g_closedloop_loopfoc_called = false;
+bool g_closedloop_move_called = false;
+bool g_closedloop_initfoc_started = false;
+bool g_closedloop_initfoc_done = false;
+
+void printState(Stream& serial, const char* reason);
+
+void advanceOpenloopAngleStep() {
+  g_openloop_debug_angle_el += config::kSimpleFocOpenloopDebugStepDeg * DEG_TO_RAD;
+  if (g_openloop_debug_angle_el >= _2PI) {
+    g_openloop_debug_angle_el -= _2PI;
+  }
+}
+
+uint32_t openloopStepIntervalMsForRpm(float rpm) {
+  const float clamped_rpm = max(1.0f, rpm);
+  const float step_rad = config::kSimpleFocOpenloopDebugStepDeg * DEG_TO_RAD;
+  const float electrical_rad_per_sec =
+      rpmToRadPerSec(clamped_rpm) * static_cast<float>(config::kConfiguredPolePairs);
+  const float interval_ms = (step_rad / electrical_rad_per_sec) * 1000.0f;
+  return static_cast<uint32_t>(max(20.0f, min(200.0f, interval_ms)));
+}
 
 bool faultActive() {
   return digitalRead(config::kDrvFaultPin) == LOW;
@@ -147,30 +182,78 @@ const StepPattern& activePattern() {
   return kForwardSteps[g_step_index % 6u];
 }
 
-void applyPattern(const StepPattern& pattern) {
+void applyPatternRaw(const StepPattern& pattern) {
   analogWrite(config::kPwmAPin, pattern.pwm_a);
   analogWrite(config::kPwmBPin, pattern.pwm_b);
   analogWrite(config::kPwmCPin, pattern.pwm_c);
 }
 
+void pwmOff() {
+  analogWrite(config::kPwmAPin, 0);
+  analogWrite(config::kPwmBPin, 0);
+  analogWrite(config::kPwmCPin, 0);
+}
+
+void drvDisable() {
+  pwmOff();
+  digitalWrite(config::kDrvEnablePin, LOW);
+  g_driver_enabled = false;
+  g_drv_configured = false;
+}
+
+bool drvStatus2GvddOv() {
+  return (g_drv.status2 & 0x80u) != 0u;
+}
+
+uint8_t drvStatus2DeviceId() {
+  return static_cast<uint8_t>(g_drv.status2 & 0x0Fu);
+}
+
+bool drvReadyForPwm() {
+  return g_driver_enabled && g_drv_configured && g_drv.control_match && !g_drv.frame_fault &&
+         !faultActive() && g_drv.status1 == 0u && !drvStatus2GvddOv();
+}
+
+bool applyPattern(const StepPattern& pattern) {
+  if (!drvReadyForPwm()) {
+    pwmOff();
+    return false;
+  }
+  applyPatternRaw(pattern);
+  return true;
+}
+
+void applyStepIndexWithDuty(uint8_t step_index, uint8_t duty) {
+  g_step_index = static_cast<uint8_t>(step_index % 6u);
+  const StepPattern& base = activePattern();
+  g_sixstep_current_duty = duty;
+  if (!drvReadyForPwm()) {
+    pwmOff();
+    return;
+  }
+  analogWrite(config::kPwmAPin, base.pwm_a ? duty : 0);
+  analogWrite(config::kPwmBPin, base.pwm_b ? duty : 0);
+  analogWrite(config::kPwmCPin, base.pwm_c ? duty : 0);
+}
+
 void applySinglePhase(uint8_t phase_index) {
+  if (!drvReadyForPwm()) {
+    pwmOff();
+    return;
+  }
   analogWrite(config::kPwmAPin, phase_index == 0 ? config::kPhaseCheckPwmDuty : 0);
   analogWrite(config::kPwmBPin, phase_index == 1 ? config::kPhaseCheckPwmDuty : 0);
   analogWrite(config::kPwmCPin, phase_index == 2 ? config::kPhaseCheckPwmDuty : 0);
 }
 
 void applySinglePhaseStability(uint8_t phase_index) {
+  if (!drvReadyForPwm()) {
+    pwmOff();
+    return;
+  }
   analogWrite(config::kPwmAPin, phase_index == 0 ? config::kDrvSpiStabilityPwmDuty : 0);
   analogWrite(config::kPwmBPin, phase_index == 1 ? config::kDrvSpiStabilityPwmDuty : 0);
   analogWrite(config::kPwmCPin, phase_index == 2 ? config::kDrvSpiStabilityPwmDuty : 0);
-}
-
-void disableOutputs() {
-  analogWrite(config::kPwmAPin, 0);
-  analogWrite(config::kPwmBPin, 0);
-  analogWrite(config::kPwmCPin, 0);
-  digitalWrite(config::kDrvEnablePin, LOW);
-  g_driver_enabled = false;
 }
 
 bool drvSpiGpioInit() {
@@ -272,6 +355,12 @@ HAL_StatusTypeDef drvWriteRegister(uint8_t reg, uint16_t value) {
 }
 
 bool drvReadAll() {
+  if (!g_driver_enabled) {
+    g_drv.spi_ok = false;
+    g_drv.frame_fault = false;
+    g_drv.control_match = false;
+    return false;
+  }
   bool ok = true;
   ok = (drvReadRegister(kDrvRegStatus1, &g_drv.status1) == HAL_OK) && ok;
   ok = (drvReadRegister(kDrvRegStatus2, &g_drv.status2) == HAL_OK) && ok;
@@ -286,6 +375,10 @@ bool drvReadAll() {
 }
 
 bool drvConfigure3Pwm() {
+  if (!g_driver_enabled) {
+    g_drv_configured = false;
+    return false;
+  }
   const uint16_t expected_ctrl1 = buildDrvControl1(false);
   const uint16_t reset_ctrl1 = buildDrvControl1(true);
   const uint16_t expected_ctrl2 = buildDrvControl2();
@@ -299,7 +392,38 @@ bool drvConfigure3Pwm() {
   if (drvWriteRegister(kDrvRegControl2, expected_ctrl2) != HAL_OK) {
     return false;
   }
-  return drvReadAll();
+  g_drv_configured = drvReadAll();
+  return g_drv_configured;
+}
+
+bool drvEnableAndConfigure(Stream& serial) {
+  pwmOff();
+  digitalWrite(config::kDrvEnablePin, HIGH);
+  delay(50);
+  g_driver_enabled = true;
+  g_drv_configured = false;
+
+  if (!drvConfigure3Pwm()) {
+    printState(serial, "drv_config_failed");
+    pwmOff();
+    g_driver_enabled = false;
+    g_drv_configured = false;
+    return false;
+  }
+
+  (void)drvReadAll();
+  if (!faultActive() && !g_drv.frame_fault && g_drv.control_match && g_drv.status1 == 0u &&
+      !drvStatus2GvddOv()) {
+    g_driver_enabled = true;
+    g_drv_configured = true;
+    return true;
+  }
+
+  printState(serial, "drv_config_invalid");
+  pwmOff();
+  g_driver_enabled = false;
+  g_drv_configured = false;
+  return false;
 }
 
 bool isValidHallState(uint8_t hall) {
@@ -343,12 +467,11 @@ uint8_t commutationIndexFromHall(uint8_t hall) {
 
 bool applyCommutationForHall(uint8_t hall) {
   if (!isValidHallState(hall)) {
-    disableOutputs();
+    pwmOff();
     return false;
   }
 
-  g_step_index = commutationIndexFromHall(hall);
-  applyPattern(activePattern());
+  applyStepIndexWithDuty(commutationIndexFromHall(hall), config::kSixStepPwmDuty);
   return true;
 }
 
@@ -359,8 +482,12 @@ void printDrvRegisters(Stream& serial) {
   serial.print(g_drv.frame_fault ? "yes" : "no");
   serial.print(" status1=0x");
   serial.print(g_drv.status1, HEX);
-  serial.print(" status2=0x");
+  serial.print(" status2_raw=0x");
   serial.print(g_drv.status2, HEX);
+  serial.print(" status2_device_id=0x");
+  serial.print(drvStatus2DeviceId(), HEX);
+  serial.print(" status2_gvdd_ov=");
+  serial.print(drvStatus2GvddOv() ? "yes" : "no");
   serial.print(" ctrl1=0x");
   serial.print(g_drv.control1, HEX);
   serial.print(" ctrl2=0x");
@@ -426,10 +553,45 @@ void printState(Stream& serial, const char* reason) {
     serial.print(g_closedloop_startup_active ? "startup" : "closed");
     serial.print(" target_rpm=");
     serial.print(config::kSimpleFocClosedloopTargetRpm, 1);
+    serial.print(" target_rad_s=");
+    serial.print(rpmToRadPerSec(config::kSimpleFocClosedloopTargetRpm), 3);
+    serial.print(" closedloop_loopfoc_called=");
+    serial.print(g_closedloop_loopfoc_called ? "yes" : "no");
+    serial.print(" closedloop_move_called=");
+    serial.print(g_closedloop_move_called ? "yes" : "no");
+    serial.print(" initFOC_start=");
+    serial.print(g_closedloop_initfoc_started ? "yes" : "no");
+    serial.print(" initFOC_done=");
+    serial.print(g_closedloop_initfoc_done ? "yes" : "no");
     serial.print(" shaft_vel=");
     serial.print(g_hall_sensor.getVelocity(), 3);
     serial.print(" shaft_angle=");
     serial.print(g_hall_sensor.getAngle(), 3);
+    serial.print(" hall=");
+    printHallBits(serial, hall);
+    serial.print(" valid=");
+    serial.print(isValidHallState(hall) ? "yes" : "no");
+    printDrvRegisters(serial);
+    serial.println();
+    return;
+  }
+
+  if (config::kTestMode == config::TEST_SIMPLEFOC_OPENLOOP_DEBUG) {
+    const uint8_t hall = readHallState();
+    serial.print("motor_test reason=");
+    serial.print(reason);
+    serial.print(" en=");
+    serial.print(g_driver_enabled ? "HIGH" : "LOW");
+    serial.print(" fault=");
+    serial.print(faultActive() ? "ACTIVE" : "inactive");
+    serial.print(" dbg_voltage=");
+    serial.print(g_openloop_debug_voltage, 2);
+    serial.print(" angle_el=");
+    serial.print(g_openloop_debug_angle_el, 3);
+    serial.print(" step_deg=");
+    serial.print(config::kSimpleFocOpenloopDebugStepDeg, 1);
+    serial.print(" step_ms=");
+    serial.print(config::kSimpleFocOpenloopDebugStepMs);
     serial.print(" hall=");
     printHallBits(serial, hall);
     serial.print(" valid=");
@@ -471,8 +633,20 @@ void printState(Stream& serial, const char* reason) {
     serial.print(faultActive() ? "ACTIVE" : "inactive");
     serial.print(" target_rpm=");
     serial.print(config::kSimpleFocOpenloopTargetRpm, 1);
+    serial.print(" target_rad_s=");
+    serial.print(g_openloop_target_rad_s, 3);
+    serial.print(" openloop_move_called=");
+    serial.print(g_openloop_move_called ? "yes" : "no");
+    serial.print(" motor.voltage_limit=");
+    serial.print(g_motor.voltage_limit, 2);
+    serial.print(" driver.voltage_limit=");
+    serial.print(g_driver.voltage_limit, 2);
+    serial.print(" drv_configured=");
+    serial.print(g_drv_configured ? "yes" : "no");
     serial.print(" hall=");
     printHallBits(serial, hall);
+    serial.print(" hall_idx=");
+    serial.print(hallIndex(hall));
     serial.print(" valid=");
     serial.print(isValidHallState(hall) ? "yes" : "no");
     printDrvRegisters(serial);
@@ -492,14 +666,16 @@ void printState(Stream& serial, const char* reason) {
   serial.print(g_step_index % 6u);
   serial.print(" pattern=");
   serial.print(pattern.label);
+  serial.print(" mode=");
+  serial.print(g_sixstep_startup_active ? "startup_kick" : "hall_track");
   serial.print(" hall_idx=");
   serial.print(hallIndex(hall));
   serial.print(" pwm=[");
-  serial.print(pattern.pwm_a);
+  serial.print(pattern.pwm_a ? g_sixstep_current_duty : 0);
   serial.print(",");
-  serial.print(pattern.pwm_b);
+  serial.print(pattern.pwm_b ? g_sixstep_current_duty : 0);
   serial.print(",");
-  serial.print(pattern.pwm_c);
+  serial.print(pattern.pwm_c ? g_sixstep_current_duty : 0);
   serial.print("] hall=");
   serial.print((hall >> 2) & 0x01);
   serial.print((hall >> 1) & 0x01);
@@ -517,15 +693,17 @@ void beginSimpleFocOpenloop(Stream& serial) {
   digitalWrite(config::kDrvEnablePin, LOW);
 
   g_fault_latched = false;
+  g_driver_enabled = false;
   g_openloop_started = false;
   g_boot_ms = millis();
   g_last_print_ms = 0;
+  g_openloop_enable_ms = 0;
+  g_openloop_target_rad_s = 0.0f;
+  g_openloop_move_called = false;
+  g_drv_configured = false;
   g_drv = {};
-
+  pwmOff();
   const bool spi_ok = drvSpiInit();
-  if (spi_ok) {
-    (void)drvReadAll();
-  }
 
   g_driver.pwm_frequency = 20000;
   g_driver.voltage_power_supply = config::kBusVoltage;
@@ -535,6 +713,7 @@ void beginSimpleFocOpenloop(Stream& serial) {
   g_motor.linkDriver(&g_driver);
   g_motor.torque_controller = TorqueControlType::voltage;
   g_motor.controller = MotionControlType::velocity_openloop;
+  g_motor.foc_modulation = FOCModulationType::Trapezoid_120;
   g_motor.voltage_limit = config::kSimpleFocOpenloopVoltageLimit;
   g_motor.velocity_limit = rpmToRadPerSec(config::kSimpleFocOpenloopTargetRpm);
   g_motor.init();
@@ -552,6 +731,53 @@ void beginSimpleFocOpenloop(Stream& serial) {
   printState(serial, "boot");
 }
 
+void beginSimpleFocOpenloopDebug(Stream& serial) {
+  pinMode(config::kDrvEnablePin, OUTPUT);
+  pinMode(config::kDrvFaultPin, INPUT_PULLUP);
+  pinMode(config::kHallAPin, INPUT_PULLUP);
+  pinMode(config::kHallBPin, INPUT_PULLUP);
+  pinMode(config::kHallCPin, INPUT_PULLUP);
+  digitalWrite(config::kDrvEnablePin, LOW);
+
+  g_fault_latched = false;
+  g_driver_enabled = false;
+  g_openloop_debug_started = false;
+  g_boot_ms = millis();
+  g_last_print_ms = 0;
+  g_openloop_debug_step_ms = 0;
+  g_openloop_debug_angle_el = 0.0f;
+  g_openloop_debug_voltage = config::kSimpleFocOpenloopDebugVoltage;
+  g_drv = {};
+  pwmOff();
+  const bool spi_ok = drvSpiInit();
+
+  g_driver.pwm_frequency = 20000;
+  g_driver.voltage_power_supply = config::kBusVoltage;
+  g_driver.voltage_limit = config::kSimpleFocOpenloopDebugVoltage;
+  g_driver.init();
+
+  g_motor.linkDriver(&g_driver);
+  g_motor.torque_controller = TorqueControlType::voltage;
+  g_motor.controller = MotionControlType::angle_openloop;
+  g_motor.foc_modulation = FOCModulationType::Trapezoid_120;
+  g_motor.voltage_limit = config::kSimpleFocOpenloopDebugVoltage;
+  g_motor.init();
+
+  serial.println("SimpleFOC 3PWM open-loop direct debug");
+  serial.println("Driver starts disabled, then direct electrical angle stepping is applied.");
+  serial.print("Enable delay ms=");
+  serial.print(config::kSimpleFocEnableDelayMs);
+  serial.print(" debug_voltage=");
+  serial.print(config::kSimpleFocOpenloopDebugVoltage, 2);
+  serial.print(" step_deg=");
+  serial.print(config::kSimpleFocOpenloopDebugStepDeg, 1);
+  serial.print(" step_ms=");
+  serial.println(config::kSimpleFocOpenloopDebugStepMs);
+  serial.print("SPI init=");
+  serial.println(spi_ok ? "ok" : "failed");
+  printState(serial, "boot");
+}
+
 void beginSimpleFocClosedloop(Stream& serial) {
   pinMode(config::kDrvEnablePin, OUTPUT);
   pinMode(config::kDrvFaultPin, INPUT_PULLUP);
@@ -561,18 +787,22 @@ void beginSimpleFocClosedloop(Stream& serial) {
   digitalWrite(config::kDrvEnablePin, LOW);
 
   g_fault_latched = false;
+  g_driver_enabled = false;
+  g_drv_configured = false;
   g_closedloop_started = false;
   g_closedloop_startup_active = false;
+  g_closedloop_loopfoc_called = false;
+  g_closedloop_move_called = false;
+  g_closedloop_initfoc_started = false;
+  g_closedloop_initfoc_done = false;
   g_boot_ms = millis();
   g_closedloop_enable_ms = 0;
   g_last_print_ms = 0;
   g_last_hall_state = readHallState();
   g_drv = {};
+  pwmOff();
 
   const bool spi_ok = drvSpiInit();
-  if (spi_ok) {
-    (void)drvReadAll();
-  }
 
   g_hall_sensor.pullup = Pullup::USE_INTERN;
   g_hall_sensor.init();
@@ -585,16 +815,18 @@ void beginSimpleFocClosedloop(Stream& serial) {
 
   g_motor.linkDriver(&g_driver);
   g_motor.linkSensor(&g_hall_sensor);
-  g_motor.torque_controller = TorqueControlType::voltage;
   g_motor.controller = MotionControlType::velocity;
+  g_motor.torque_controller = TorqueControlType::voltage;
   g_motor.voltage_limit = config::kSimpleFocClosedloopVoltageLimit;
   g_motor.velocity_limit = rpmToRadPerSec(config::kSimpleFocClosedloopVelocityLimit);
   g_motor.PID_velocity.P = config::kSimpleFocClosedloopVelP;
   g_motor.PID_velocity.I = config::kSimpleFocClosedloopVelI;
   g_motor.PID_velocity.D = config::kSimpleFocClosedloopVelD;
   g_motor.LPF_velocity.Tf = config::kSimpleFocClosedloopVelLpfTf;
+  g_motor.voltage_sensor_align = 0.5f;
   g_motor.init();
 
+  // új rész 
   serial.println("SimpleFOC 3PWM closed-loop hall test");
   serial.println("Driver starts disabled, then DRV8301 is configured over SPI.");
   serial.print("Enable delay ms=");
@@ -640,7 +872,7 @@ void beginPhaseCheck(Stream& serial) {
   pinMode(config::kPwmAPin, OUTPUT);
   pinMode(config::kPwmBPin, OUTPUT);
   pinMode(config::kPwmCPin, OUTPUT);
-  disableOutputs();
+  drvDisable();
 
   g_fault_latched = false;
   g_driver_enabled = false;
@@ -679,7 +911,7 @@ void beginDrvSpiStability(Stream& serial) {
   pinMode(config::kPwmAPin, OUTPUT);
   pinMode(config::kPwmBPin, OUTPUT);
   pinMode(config::kPwmCPin, OUTPUT);
-  disableOutputs();
+  drvDisable();
 
   g_fault_latched = false;
   g_driver_enabled = false;
@@ -717,10 +949,11 @@ void updatePhaseCheck(Stream& serial) {
 
   if (fault_active) {
     if (g_driver_enabled || !g_fault_latched) {
-      disableOutputs();
-      g_fault_latched = true;
+      pwmOff();
       (void)drvReadAll();
-      printState(serial, "fault_shutdown");
+      printState(serial, "fault_before_disable");
+      drvDisable();
+      g_fault_latched = true;
     }
     return;
   }
@@ -732,13 +965,11 @@ void updatePhaseCheck(Stream& serial) {
   }
 
   if (!g_driver_enabled && (now - g_boot_ms) >= config::kPhaseCheckEnableDelayMs) {
-    digitalWrite(config::kDrvEnablePin, HIGH);
-    delay(2);
-    g_driver_enabled = true;
-    (void)drvConfigure3Pwm();
-    applySinglePhase(g_step_index % 3u);
-    g_last_phase_change_ms = now;
-    printState(serial, "enable_applied");
+    if (drvEnableAndConfigure(serial)) {
+      applySinglePhase(g_step_index % 3u);
+      g_last_phase_change_ms = now;
+    }
+    printState(serial, drvReadyForPwm() ? "enable_applied" : "enable_failed");
   }
 
   if (g_driver_enabled && (now - g_last_phase_change_ms) >= config::kPhaseCheckHoldMs) {
@@ -764,10 +995,11 @@ void updateDrvSpiStability(Stream& serial) {
 
   if (fault_active) {
     if (g_driver_enabled || !g_fault_latched) {
-      disableOutputs();
-      g_fault_latched = true;
+      pwmOff();
       (void)drvReadAll();
-      printState(serial, "fault_shutdown");
+      printState(serial, "fault_before_disable");
+      drvDisable();
+      g_fault_latched = true;
     }
     return;
   }
@@ -779,12 +1011,10 @@ void updateDrvSpiStability(Stream& serial) {
   }
 
   if (!g_driver_enabled && (now - g_boot_ms) >= config::kDrvSpiStabilityEnableDelayMs) {
-    digitalWrite(config::kDrvEnablePin, HIGH);
-    delay(2);
-    g_driver_enabled = true;
-    (void)drvConfigure3Pwm();
-    g_last_phase_change_ms = now;
-    printState(serial, "enable_applied");
+    if (drvEnableAndConfigure(serial)) {
+      g_last_phase_change_ms = now;
+    }
+    printState(serial, drvReadyForPwm() ? "enable_applied" : "enable_failed");
   }
 
   if (g_driver_enabled && !g_drv_spi_stage_pwm &&
@@ -824,43 +1054,54 @@ void updateSimpleFocOpenloop(Stream& serial) {
     if (g_driver_enabled || !g_fault_latched) {
       g_motor.disable();
       g_driver.disable();
-      digitalWrite(config::kDrvEnablePin, LOW);
-      g_driver_enabled = false;
-      g_openloop_started = false;
-      g_fault_latched = true;
+      pwmOff();
       (void)drvReadAll();
-      printState(serial, "fault_shutdown");
+      printState(serial, "fault_before_disable");
+      drvDisable();
+      g_openloop_started = false;
+      g_openloop_enable_ms = 0;
+      g_openloop_target_rad_s = 0.0f;
+      g_openloop_move_called = false;
+      g_fault_latched = true;
     }
     return;
   }
 
   if (g_fault_latched) {
     g_fault_latched = false;
-    (void)drvReadAll();
+    g_openloop_move_called = false;
     printState(serial, "fault_cleared");
   }
 
   if (!g_driver_enabled && (now - g_boot_ms) >= config::kSimpleFocEnableDelayMs) {
-    digitalWrite(config::kDrvEnablePin, HIGH);
-    delay(2);
-    g_driver_enabled = true;
-    (void)drvConfigure3Pwm();
-    g_driver.enable();
-    g_motor.enable();
-    g_openloop_started = true;
-    g_last_hall_state = hall;
-    printState(serial, "enable_applied");
+    if (drvEnableAndConfigure(serial)) {
+      g_driver.enable();
+      g_motor.enable();
+      g_openloop_started = true;
+      g_openloop_enable_ms = now;
+      g_last_hall_state = hall;
+    } else {
+      g_openloop_started = false;
+    }
+    printState(serial, g_openloop_started ? "enable_applied" : "enable_failed");
   }
 
-  if (g_openloop_started) {
-    g_motor.move(rpmToRadPerSec(config::kSimpleFocOpenloopTargetRpm));
+  g_openloop_target_rad_s = rpmToRadPerSec(config::kSimpleFocOpenloopTargetRpm);
+  g_openloop_move_called = false;
+
+  if (drvReadyForPwm() && g_openloop_started) {
+    g_motor.voltage_limit = config::kSimpleFocOpenloopVoltageLimit;
+    g_motor.move(g_openloop_target_rad_s);
+    g_openloop_move_called = true;
   } else {
-    g_motor.move(0.0f);
+    pwmOff();
   }
 
   if ((now - g_last_print_ms) >= config::kSimpleFocStatusIntervalMs) {
     g_last_print_ms = now;
-    (void)drvReadAll();
+    if (g_driver_enabled) {
+      (void)drvReadAll();
+    }
     printState(serial, "periodic");
   }
 
@@ -875,8 +1116,90 @@ void updateSimpleFocOpenloop(Stream& serial) {
     serial.print(hallIndex(hall));
     serial.print(" valid=");
     serial.print(isValidHallState(hall) ? "yes" : "no");
-    serial.print(" target_rpm=");
-    serial.print(config::kSimpleFocOpenloopTargetRpm, 1);
+    serial.print(" target_rad_s=");
+    serial.print(g_openloop_target_rad_s, 3);
+    serial.print(" openloop_move_called=");
+    serial.print(g_openloop_move_called ? "yes" : "no");
+    serial.print(" drv_configured=");
+    serial.print(g_drv_configured ? "yes" : "no");
+    printDrvRegisters(serial);
+    serial.println();
+    g_last_hall_state = hall;
+  }
+}
+
+void updateSimpleFocOpenloopDebug(Stream& serial) {
+  const uint32_t now = millis();
+  const bool fault_active = faultActive();
+  const uint8_t hall = readHallState();
+
+  if (fault_active) {
+    if (g_driver_enabled || !g_fault_latched) {
+      g_motor.disable();
+      g_driver.disable();
+      pwmOff();
+      (void)drvReadAll();
+      printState(serial, "fault_before_disable");
+      drvDisable();
+      g_openloop_debug_started = false;
+      g_fault_latched = true;
+    }
+    return;
+  }
+
+  if (g_fault_latched) {
+    g_fault_latched = false;
+    printState(serial, "fault_cleared");
+  }
+
+  if (!g_driver_enabled && (now - g_boot_ms) >= config::kSimpleFocEnableDelayMs) {
+    if (drvEnableAndConfigure(serial)) {
+      g_driver.enable();
+      g_motor.enable();
+      g_openloop_debug_started = true;
+      g_openloop_debug_step_ms = now;
+      g_openloop_debug_angle_el = 0.0f;
+      g_openloop_debug_voltage = config::kSimpleFocOpenloopDebugVoltage;
+      g_last_hall_state = hall;
+      if (drvReadyForPwm()) {
+        g_motor.setPhaseVoltage(g_openloop_debug_voltage, 0.0f, g_openloop_debug_angle_el);
+      }
+    }
+    printState(serial, g_openloop_debug_started ? "enable_applied" : "enable_failed");
+  }
+
+  if (g_openloop_debug_started && (now - g_openloop_debug_step_ms) >= config::kSimpleFocOpenloopDebugStepMs) {
+    g_openloop_debug_step_ms = now;
+    advanceOpenloopAngleStep();
+    if (drvReadyForPwm()) {
+      g_motor.setPhaseVoltage(g_openloop_debug_voltage, 0.0f, g_openloop_debug_angle_el);
+    } else {
+      pwmOff();
+    }
+    printState(serial, "angle_step");
+  }
+
+  if ((now - g_last_print_ms) >= config::kSimpleFocStatusIntervalMs) {
+    g_last_print_ms = now;
+    if (g_driver_enabled) {
+      (void)drvReadAll();
+    }
+    printState(serial, "periodic");
+  }
+
+  if (config::kSimpleFocLogHallChanges && g_driver_enabled && hall != g_last_hall_state) {
+    serial.print("motor_test reason=hall_change prev=");
+    printHallBits(serial, g_last_hall_state);
+    serial.print(" next=");
+    printHallBits(serial, hall);
+    serial.print(" prev_idx=");
+    serial.print(hallIndex(g_last_hall_state));
+    serial.print(" next_idx=");
+    serial.print(hallIndex(hall));
+    serial.print(" valid=");
+    serial.print(isValidHallState(hall) ? "yes" : "no");
+    serial.print(" angle_el=");
+    serial.print(g_openloop_debug_angle_el, 3);
     printDrvRegisters(serial);
     serial.println();
     g_last_hall_state = hall;
@@ -887,45 +1210,54 @@ void updateSimpleFocClosedloop(Stream& serial) {
   const uint32_t now = millis();
   const bool fault_active = faultActive();
   const uint8_t hall = readHallState();
+  g_closedloop_loopfoc_called = false;
+  g_closedloop_move_called = false;
 
   if (fault_active) {
     if (g_driver_enabled || !g_fault_latched) {
       g_motor.disable();
       g_driver.disable();
-      digitalWrite(config::kDrvEnablePin, LOW);
-      g_driver_enabled = false;
-      g_closedloop_started = false;
-      g_fault_latched = true;
+      pwmOff();
       (void)drvReadAll();
-      printState(serial, "fault_shutdown");
+      printState(serial, "fault_before_disable");
+      drvDisable();
+      g_closedloop_started = false;
+      g_closedloop_initfoc_done = false;
+      g_fault_latched = true;
     }
     return;
   }
 
   if (g_fault_latched) {
     g_fault_latched = false;
-    (void)drvReadAll();
     printState(serial, "fault_cleared");
   }
 
   if (!g_driver_enabled && (now - g_boot_ms) >= config::kSimpleFocEnableDelayMs) {
-    digitalWrite(config::kDrvEnablePin, HIGH);
-    delay(2);
-    g_driver_enabled = true;
-    (void)drvConfigure3Pwm();
-    g_driver.enable();
-    g_motor.enable();
-    g_motor.initFOC();
-    g_closedloop_started = true;
-    g_closedloop_startup_active = config::kSimpleFocClosedloopUseStartupAssist;
-    g_closedloop_enable_ms = now;
-    g_motor.controller = g_closedloop_startup_active ? MotionControlType::velocity_openloop
-                                                     : MotionControlType::velocity;
-    g_last_hall_state = hall;
-    printState(serial, "enable_applied");
+    if (drvEnableAndConfigure(serial)) {
+      g_driver.enable();
+      g_motor.enable();
+      g_closedloop_enable_ms = now;
+      g_last_hall_state = hall;
+      g_closedloop_initfoc_started = true;
+      printState(serial, "initFOC_start");
+      g_motor.initFOC();
+      g_closedloop_initfoc_done = true;
+      printState(serial, "initFOC_done");
+      if (drvReadyForPwm()) {
+        g_closedloop_started = true;
+        g_closedloop_startup_active = config::kSimpleFocClosedloopUseStartupAssist;
+        g_motor.controller = g_closedloop_startup_active ? MotionControlType::velocity_openloop
+                                                         : MotionControlType::velocity;
+      } else {
+        pwmOff();
+        g_closedloop_started = false;
+      }
+    }
+    printState(serial, g_closedloop_started ? "enable_applied" : "enable_failed");
   }
 
-  if (g_closedloop_started) {
+  if (g_closedloop_started && drvReadyForPwm()) {
     const float target_sign = config::kSimpleFocClosedloopReverse ? -1.0f : 1.0f;
     if (g_closedloop_startup_active) {
       const uint32_t elapsed_ms = now - g_closedloop_enable_ms;
@@ -935,20 +1267,25 @@ void updateSimpleFocClosedloop(Stream& serial) {
         printState(serial, "startup_handoff");
       } else {
         g_motor.move(rpmToRadPerSec(config::kSimpleFocClosedloopStartupRpm) * target_sign);
+        g_closedloop_move_called = true;
       }
     }
 
     if (!g_closedloop_startup_active) {
       g_motor.loopFOC();
+      g_closedloop_loopfoc_called = true;
       g_motor.move(rpmToRadPerSec(config::kSimpleFocClosedloopTargetRpm) * target_sign);
+      g_closedloop_move_called = true;
     }
   } else {
-    g_motor.move(0.0f);
+    pwmOff();
   }
 
   if ((now - g_last_print_ms) >= config::kSimpleFocStatusIntervalMs) {
     g_last_print_ms = now;
-    (void)drvReadAll();
+    if (g_driver_enabled) {
+      (void)drvReadAll();
+    }
     printState(serial, "periodic");
   }
 
@@ -1005,6 +1342,11 @@ void begin(Stream& serial) {
     return;
   }
 
+  if (config::kTestMode == config::TEST_SIMPLEFOC_OPENLOOP_DEBUG) {
+    beginSimpleFocOpenloopDebug(serial);
+    return;
+  }
+
   if (config::kTestMode == config::TEST_PHASE_CHECK) {
     beginPhaseCheck(serial);
     return;
@@ -1023,13 +1365,25 @@ void begin(Stream& serial) {
   pinMode(config::kPwmAPin, OUTPUT);
   pinMode(config::kPwmBPin, OUTPUT);
   pinMode(config::kPwmCPin, OUTPUT);
-  disableOutputs();
+  drvDisable();
 
   g_fault_latched = false;
+  g_driver_enabled = false;
+  g_drv_configured = false;
+  g_sixstep_startup_active = false;
   g_step_index = 0;
   g_last_hall_state = readHallState();
   g_boot_ms = millis();
   g_last_print_ms = 0;
+  g_sixstep_enable_ms = 0;
+  g_sixstep_last_kick_ms = 0;
+  g_sixstep_current_duty = config::kSixStepPwmDuty;
+  g_drv = {};
+
+  const bool spi_ok = drvSpiInit();
+  if (spi_ok) {
+    (void)drvReadAll();
+  }
 
   serial.println("6-step hall commutation test");
   serial.println("Driver starts disabled and outputs are zero.");
@@ -1037,10 +1391,18 @@ void begin(Stream& serial) {
   serial.print(config::kSixStepEnableDelayMs);
   serial.print(" pwm duty=");
   serial.print(config::kSixStepPwmDuty);
+  serial.print(" startup duty=");
+  serial.print(config::kSixStepStartupPwmDuty);
+  serial.print(" startup step ms=");
+  serial.print(config::kSixStepStartupStepMs);
+  serial.print(" startup kick ms=");
+  serial.print(config::kSixStepStartupKickMs);
   serial.print(" hall advance=");
   serial.print(config::kSixStepHallAdvance);
   serial.print(" reverse=");
   serial.println(config::kSixStepReverseDirection ? "yes" : "no");
+  serial.print("SPI init=");
+  serial.println(spi_ok ? "ok" : "failed");
   serial.println("Keep motor unloaded. Stop immediately on harsh vibration.");
   printState(serial, "boot");
 }
@@ -1071,39 +1433,67 @@ void update(Stream& serial) {
     return;
   }
 
+  if (config::kTestMode == config::TEST_SIMPLEFOC_OPENLOOP_DEBUG) {
+    updateSimpleFocOpenloopDebug(serial);
+    return;
+  }
+
   const uint32_t now = millis();
   const bool fault_active = faultActive();
 
   if (fault_active) {
     if (g_driver_enabled || !g_fault_latched) {
-      disableOutputs();
+      (void)drvReadAll();
+      printState(serial, "fault_before_disable");
+      drvDisable();
       g_fault_latched = true;
-      printState(serial, "fault_shutdown");
     }
     return;
   }
 
   if (g_fault_latched) {
     g_fault_latched = false;
+    (void)drvReadAll();
     printState(serial, "fault_cleared");
   }
 
   if (!g_driver_enabled && (now - g_boot_ms) >= config::kSixStepEnableDelayMs) {
-    digitalWrite(config::kDrvEnablePin, HIGH);
-    g_driver_enabled = true;
-    const bool commutation_ok = applyCommutationForHall(readHallState());
-    printState(serial, commutation_ok ? "enable_applied" : "enable_invalid_hall");
+    const bool drv_ok = drvEnableAndConfigure(serial);
+    g_sixstep_enable_ms = now;
+    g_sixstep_last_kick_ms = now;
+    g_sixstep_startup_active = drv_ok;
+    const bool commutation_ok = drv_ok && applyCommutationForHall(readHallState());
+    if (commutation_ok) {
+      applyStepIndexWithDuty(g_step_index, config::kSixStepStartupPwmDuty);
+    }
+    printState(serial, commutation_ok ? "enable_applied" : "enable_failed");
   }
 
   const uint8_t hall = readHallState();
   if (g_driver_enabled && hall != g_last_hall_state) {
     g_last_hall_state = hall;
+    g_sixstep_startup_active = false;
     const bool commutation_ok = applyCommutationForHall(hall);
     printState(serial, commutation_ok ? "hall_update" : "invalid_hall");
   }
 
+  if (g_driver_enabled && g_sixstep_startup_active) {
+    if ((now - g_sixstep_enable_ms) >= config::kSixStepStartupKickMs) {
+      g_sixstep_startup_active = false;
+      (void)applyCommutationForHall(readHallState());
+      printState(serial, "startup_complete");
+    } else if ((now - g_sixstep_last_kick_ms) >= config::kSixStepStartupStepMs) {
+      g_sixstep_last_kick_ms = now;
+      applyStepIndexWithDuty(static_cast<uint8_t>(g_step_index + 1u), config::kSixStepStartupPwmDuty);
+      printState(serial, "startup_kick");
+    }
+  }
+
   if ((now - g_last_print_ms) >= config::kSixStepStatusIntervalMs) {
     g_last_print_ms = now;
+    if (g_driver_enabled) {
+      (void)drvReadAll();
+    }
     printState(serial, "periodic");
   }
 }
