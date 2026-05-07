@@ -35,7 +35,9 @@ struct DrvRegisters {
 SPI_HandleTypeDef g_hspi1 = {};
 DrvRegisters g_drv = {};
 BLDCMotor g_motor(config::kConfiguredPolePairs);
-BLDCDriver3PWM g_driver(config::kPwmAPin, config::kPwmBPin, config::kPwmCPin);
+BLDCDriver3PWM g_driver3(config::kPwmAPin, config::kPwmBPin, config::kPwmCPin);
+BLDCDriver6PWM g_driver6(config::kPwmAPin, config::kPwmALowPin, config::kPwmBPin,
+                         config::kPwmBLowPin, config::kPwmCPin, config::kPwmCLowPin);
 HallSensor g_hall_sensor(config::kHallAPin, config::kHallBPin, config::kHallCPin,
                          config::kConfiguredPolePairs);
 
@@ -106,8 +108,71 @@ bool g_closedloop_loopfoc_called = false;
 bool g_closedloop_move_called = false;
 bool g_closedloop_initfoc_started = false;
 bool g_closedloop_initfoc_done = false;
+bool g_closedloop_handoff_allowed = false;
+bool g_closedloop_handoff_evaluated = false;
+float g_closedloop_startup_target_rad_s = 0.0f;
+float g_closedloop_measured_rad_s_at_handoff = 0.0f;
+int32_t g_closedloop_hall_forward_count = 0;
+int32_t g_closedloop_hall_reverse_count = 0;
+int32_t g_closedloop_hall_jump_count = 0;
+int32_t g_closedloop_hall_invalid_count = 0;
+int8_t g_closedloop_last_hall_idx = -1;
+int8_t g_closedloop_hall_delta = 0;
+volatile uint32_t hall_a_irq_count = 0;
+volatile uint32_t hall_b_irq_count = 0;
+volatile uint32_t hall_c_irq_count = 0;
+uint32_t g_last_hall_a_irq_count = 0;
+uint32_t g_last_hall_b_irq_count = 0;
+uint32_t g_last_hall_c_irq_count = 0;
+uint32_t g_hall_a_irq_delta = 0;
+uint32_t g_hall_b_irq_delta = 0;
+uint32_t g_hall_c_irq_delta = 0;
+float g_last_sensor_angle = 0.0f;
+float g_last_sensor_velocity = 0.0f;
+bool g_sensor_angle_changes = false;
+bool g_sensor_velocity_valid = false;
+bool g_hall_irq_counts_increasing = false;
 
 void printState(Stream& serial, const char* reason);
+bool isValidHallState(uint8_t hall);
+int8_t hallIndex(uint8_t hall);
+
+bool isClosedloop6PwmMode() {
+  return config::kTestMode == config::TEST_SIMPLEFOC_CLOSEDLOOP_6PWM;
+}
+
+float closedloopMeasuredRadS() {
+  return g_hall_sensor.getVelocity();
+}
+
+float closedloopTargetRadS() {
+  return rpmToRadPerSec(config::kSimpleFocClosedloopTargetRpm) *
+         (config::kSimpleFocClosedloopReverse ? -1.0f : 1.0f);
+}
+
+void recordClosedloopHallTransition(uint8_t prev_hall, uint8_t next_hall) {
+  const int8_t prev_idx = hallIndex(prev_hall);
+  const int8_t next_idx = hallIndex(next_hall);
+  g_closedloop_last_hall_idx = next_idx;
+
+  if (!isValidHallState(next_hall) || prev_idx < 0 || next_idx < 0) {
+    ++g_closedloop_hall_invalid_count;
+    g_closedloop_hall_delta = 0;
+    return;
+  }
+
+  const int8_t forward_delta = static_cast<int8_t>((next_idx - prev_idx + 6) % 6);
+  if (forward_delta == 1) {
+    ++g_closedloop_hall_forward_count;
+    g_closedloop_hall_delta = 1;
+  } else if (forward_delta == 5) {
+    ++g_closedloop_hall_reverse_count;
+    g_closedloop_hall_delta = -1;
+  } else {
+    ++g_closedloop_hall_jump_count;
+    g_closedloop_hall_delta = forward_delta;
+  }
+}
 
 void advanceOpenloopAngleStep() {
   g_openloop_debug_angle_el += config::kSimpleFocOpenloopDebugStepDeg * DEG_TO_RAD;
@@ -130,14 +195,17 @@ bool faultActive() {
 }
 
 void doHallA() {
+  ++hall_a_irq_count;
   g_hall_sensor.handleA();
 }
 
 void doHallB() {
+  ++hall_b_irq_count;
   g_hall_sensor.handleB();
 }
 
 void doHallC() {
+  ++hall_c_irq_count;
   g_hall_sensor.handleC();
 }
 
@@ -145,7 +213,7 @@ uint16_t buildDrvControl1(bool gate_reset) {
   uint16_t value = 0;
   value |= static_cast<uint16_t>(config::kDrvOcpAdjustCode & 0x1Fu);
   value |= static_cast<uint16_t>((config::kDrvOcpModeCode & 0x03u) << kCtrl1OcpModeShift);
-  if (config::kDrvUse3PwmMode) {
+  if (!isClosedloop6PwmMode() && config::kDrvUse3PwmMode) {
     value |= static_cast<uint16_t>(1u << kCtrl1PwmModeBit);
   }
   if (gate_reset) {
@@ -186,12 +254,18 @@ void applyPatternRaw(const StepPattern& pattern) {
   analogWrite(config::kPwmAPin, pattern.pwm_a);
   analogWrite(config::kPwmBPin, pattern.pwm_b);
   analogWrite(config::kPwmCPin, pattern.pwm_c);
+  analogWrite(config::kPwmALowPin, 0);
+  analogWrite(config::kPwmBLowPin, 0);
+  analogWrite(config::kPwmCLowPin, 0);
 }
 
 void pwmOff() {
   analogWrite(config::kPwmAPin, 0);
   analogWrite(config::kPwmBPin, 0);
   analogWrite(config::kPwmCPin, 0);
+  analogWrite(config::kPwmALowPin, 0);
+  analogWrite(config::kPwmBLowPin, 0);
+  analogWrite(config::kPwmCLowPin, 0);
 }
 
 void drvDisable() {
@@ -234,6 +308,9 @@ void applyStepIndexWithDuty(uint8_t step_index, uint8_t duty) {
   analogWrite(config::kPwmAPin, base.pwm_a ? duty : 0);
   analogWrite(config::kPwmBPin, base.pwm_b ? duty : 0);
   analogWrite(config::kPwmCPin, base.pwm_c ? duty : 0);
+  analogWrite(config::kPwmALowPin, 0);
+  analogWrite(config::kPwmBLowPin, 0);
+  analogWrite(config::kPwmCLowPin, 0);
 }
 
 void applySinglePhase(uint8_t phase_index) {
@@ -244,6 +321,9 @@ void applySinglePhase(uint8_t phase_index) {
   analogWrite(config::kPwmAPin, phase_index == 0 ? config::kPhaseCheckPwmDuty : 0);
   analogWrite(config::kPwmBPin, phase_index == 1 ? config::kPhaseCheckPwmDuty : 0);
   analogWrite(config::kPwmCPin, phase_index == 2 ? config::kPhaseCheckPwmDuty : 0);
+  analogWrite(config::kPwmALowPin, 0);
+  analogWrite(config::kPwmBLowPin, 0);
+  analogWrite(config::kPwmCLowPin, 0);
 }
 
 void applySinglePhaseStability(uint8_t phase_index) {
@@ -254,6 +334,9 @@ void applySinglePhaseStability(uint8_t phase_index) {
   analogWrite(config::kPwmAPin, phase_index == 0 ? config::kDrvSpiStabilityPwmDuty : 0);
   analogWrite(config::kPwmBPin, phase_index == 1 ? config::kDrvSpiStabilityPwmDuty : 0);
   analogWrite(config::kPwmCPin, phase_index == 2 ? config::kDrvSpiStabilityPwmDuty : 0);
+  analogWrite(config::kPwmALowPin, 0);
+  analogWrite(config::kPwmBLowPin, 0);
+  analogWrite(config::kPwmCLowPin, 0);
 }
 
 bool drvSpiGpioInit() {
@@ -540,9 +623,19 @@ void printState(Stream& serial, const char* reason) {
     return;
   }
 
-  if (config::kTestMode == config::TEST_SIMPLEFOC_CLOSEDLOOP) {
+  if (config::kTestMode == config::TEST_SIMPLEFOC_CLOSEDLOOP ||
+      config::kTestMode == config::TEST_SIMPLEFOC_CLOSEDLOOP_6PWM) {
     const uint8_t hall = readHallState();
-    g_hall_sensor.update();
+    const float measured_rad_s = closedloopMeasuredRadS();
+    const float target_rad_s =
+        g_closedloop_startup_active ? g_closedloop_startup_target_rad_s : closedloopTargetRadS();
+    const float sensor_angle = g_hall_sensor.getAngle();
+    const float sensor_velocity = g_hall_sensor.getVelocity();
+    const float motor_shaft_angle = g_motor.shaft_angle;
+    const float motor_shaft_velocity = g_motor.shaft_velocity;
+    const uint32_t irq_a = hall_a_irq_count;
+    const uint32_t irq_b = hall_b_irq_count;
+    const uint32_t irq_c = hall_c_irq_count;
     serial.print("motor_test reason=");
     serial.print(reason);
     serial.print(" en=");
@@ -551,10 +644,32 @@ void printState(Stream& serial, const char* reason) {
     serial.print(faultActive() ? "ACTIVE" : "inactive");
     serial.print(" mode=");
     serial.print(g_closedloop_startup_active ? "startup" : "closed");
+    serial.print(" pwm_mode=");
+    serial.print(isClosedloop6PwmMode() ? "6PWM" : "3PWM");
     serial.print(" target_rpm=");
     serial.print(config::kSimpleFocClosedloopTargetRpm, 1);
     serial.print(" target_rad_s=");
-    serial.print(rpmToRadPerSec(config::kSimpleFocClosedloopTargetRpm), 3);
+    serial.print(target_rad_s, 3);
+    serial.print(" measured_rad_s=");
+    serial.print(measured_rad_s, 3);
+    serial.print(" velocity_error=");
+    serial.print(target_rad_s - measured_rad_s, 3);
+    serial.print(" startup_target_rad_s=");
+    serial.print(g_closedloop_startup_target_rad_s, 3);
+    serial.print(" measured_rad_s_at_handoff=");
+    serial.print(g_closedloop_measured_rad_s_at_handoff, 3);
+    serial.print(" handoff_allowed=");
+    serial.print(g_closedloop_handoff_allowed ? "yes" : "no");
+    serial.print(" voltage_limit=");
+    serial.print(g_motor.voltage_limit, 2);
+    serial.print(" pid_p=");
+    serial.print(g_motor.PID_velocity.P, 4);
+    serial.print(" pid_i=");
+    serial.print(g_motor.PID_velocity.I, 4);
+    serial.print(" pid_d=");
+    serial.print(g_motor.PID_velocity.D, 4);
+    serial.print(" lpf_tf=");
+    serial.print(g_motor.LPF_velocity.Tf, 3);
     serial.print(" closedloop_loopfoc_called=");
     serial.print(g_closedloop_loopfoc_called ? "yes" : "no");
     serial.print(" closedloop_move_called=");
@@ -564,13 +679,55 @@ void printState(Stream& serial, const char* reason) {
     serial.print(" initFOC_done=");
     serial.print(g_closedloop_initfoc_done ? "yes" : "no");
     serial.print(" shaft_vel=");
-    serial.print(g_hall_sensor.getVelocity(), 3);
+    serial.print(measured_rad_s, 3);
     serial.print(" shaft_angle=");
-    serial.print(g_hall_sensor.getAngle(), 3);
-    serial.print(" hall=");
+    serial.print(sensor_angle, 3);
+    serial.print(" raw_hall=");
     printHallBits(serial, hall);
+    serial.print(" raw_hall_idx=");
+    serial.print(hallIndex(hall));
     serial.print(" valid=");
     serial.print(isValidHallState(hall) ? "yes" : "no");
+    serial.print(" hall_irq_a=");
+    serial.print(irq_a);
+    serial.print(" hall_irq_b=");
+    serial.print(irq_b);
+    serial.print(" hall_irq_c=");
+    serial.print(irq_c);
+    serial.print(" hall_irq_a_delta=");
+    serial.print(g_hall_a_irq_delta);
+    serial.print(" hall_irq_b_delta=");
+    serial.print(g_hall_b_irq_delta);
+    serial.print(" hall_irq_c_delta=");
+    serial.print(g_hall_c_irq_delta);
+    serial.print(" hall_irq_counts_increasing=");
+    serial.print(g_hall_irq_counts_increasing ? "yes" : "no");
+    serial.print(" sensor_angle=");
+    serial.print(sensor_angle, 3);
+    serial.print(" sensor_velocity=");
+    serial.print(sensor_velocity, 3);
+    serial.print(" sensor_angle_changes=");
+    serial.print(g_sensor_angle_changes ? "yes" : "no");
+    serial.print(" sensor_velocity_valid=");
+    serial.print(g_sensor_velocity_valid ? "yes" : "no");
+    serial.print(" motor_shaft_angle=");
+    serial.print(motor_shaft_angle, 3);
+    serial.print(" motor_shaft_velocity=");
+    serial.print(motor_shaft_velocity, 3);
+    serial.print(" drv_configured=");
+    serial.print(g_drv_configured ? "yes" : "no");
+    serial.print(" hall_fwd=");
+    serial.print(g_closedloop_hall_forward_count);
+    serial.print(" hall_rev=");
+    serial.print(g_closedloop_hall_reverse_count);
+    serial.print(" hall_jump=");
+    serial.print(g_closedloop_hall_jump_count);
+    serial.print(" hall_invalid=");
+    serial.print(g_closedloop_hall_invalid_count);
+    serial.print(" last_hall=");
+    serial.print(g_closedloop_last_hall_idx);
+    serial.print(" hall_delta=");
+    serial.print(g_closedloop_hall_delta);
     printDrvRegisters(serial);
     serial.println();
     return;
@@ -640,7 +797,7 @@ void printState(Stream& serial, const char* reason) {
     serial.print(" motor.voltage_limit=");
     serial.print(g_motor.voltage_limit, 2);
     serial.print(" driver.voltage_limit=");
-    serial.print(g_driver.voltage_limit, 2);
+    serial.print(g_driver3.voltage_limit, 2);
     serial.print(" drv_configured=");
     serial.print(g_drv_configured ? "yes" : "no");
     serial.print(" hall=");
@@ -705,12 +862,12 @@ void beginSimpleFocOpenloop(Stream& serial) {
   pwmOff();
   const bool spi_ok = drvSpiInit();
 
-  g_driver.pwm_frequency = 20000;
-  g_driver.voltage_power_supply = config::kBusVoltage;
-  g_driver.voltage_limit = config::kSimpleFocOpenloopVoltageLimit;
-  g_driver.init();
+  g_driver3.pwm_frequency = 20000;
+  g_driver3.voltage_power_supply = config::kBusVoltage;
+  g_driver3.voltage_limit = config::kSimpleFocOpenloopVoltageLimit;
+  g_driver3.init();
 
-  g_motor.linkDriver(&g_driver);
+  g_motor.linkDriver(&g_driver3);
   g_motor.torque_controller = TorqueControlType::voltage;
   g_motor.controller = MotionControlType::velocity_openloop;
   g_motor.foc_modulation = FOCModulationType::Trapezoid_120;
@@ -751,12 +908,12 @@ void beginSimpleFocOpenloopDebug(Stream& serial) {
   pwmOff();
   const bool spi_ok = drvSpiInit();
 
-  g_driver.pwm_frequency = 20000;
-  g_driver.voltage_power_supply = config::kBusVoltage;
-  g_driver.voltage_limit = config::kSimpleFocOpenloopDebugVoltage;
-  g_driver.init();
+  g_driver3.pwm_frequency = 20000;
+  g_driver3.voltage_power_supply = config::kBusVoltage;
+  g_driver3.voltage_limit = config::kSimpleFocOpenloopDebugVoltage;
+  g_driver3.init();
 
-  g_motor.linkDriver(&g_driver);
+  g_motor.linkDriver(&g_driver3);
   g_motor.torque_controller = TorqueControlType::voltage;
   g_motor.controller = MotionControlType::angle_openloop;
   g_motor.foc_modulation = FOCModulationType::Trapezoid_120;
@@ -795,10 +952,34 @@ void beginSimpleFocClosedloop(Stream& serial) {
   g_closedloop_move_called = false;
   g_closedloop_initfoc_started = false;
   g_closedloop_initfoc_done = false;
+  g_closedloop_handoff_allowed = false;
+  g_closedloop_handoff_evaluated = false;
   g_boot_ms = millis();
   g_closedloop_enable_ms = 0;
   g_last_print_ms = 0;
   g_last_hall_state = readHallState();
+  g_closedloop_startup_target_rad_s = 0.0f;
+  g_closedloop_measured_rad_s_at_handoff = 0.0f;
+  g_closedloop_hall_forward_count = 0;
+  g_closedloop_hall_reverse_count = 0;
+  g_closedloop_hall_jump_count = 0;
+  g_closedloop_hall_invalid_count = 0;
+  g_closedloop_last_hall_idx = hallIndex(g_last_hall_state);
+  g_closedloop_hall_delta = 0;
+  hall_a_irq_count = 0;
+  hall_b_irq_count = 0;
+  hall_c_irq_count = 0;
+  g_last_hall_a_irq_count = 0;
+  g_last_hall_b_irq_count = 0;
+  g_last_hall_c_irq_count = 0;
+  g_hall_a_irq_delta = 0;
+  g_hall_b_irq_delta = 0;
+  g_hall_c_irq_delta = 0;
+  g_last_sensor_angle = 0.0f;
+  g_last_sensor_velocity = 0.0f;
+  g_sensor_angle_changes = false;
+  g_sensor_velocity_valid = false;
+  g_hall_irq_counts_increasing = false;
   g_drv = {};
   pwmOff();
 
@@ -808,12 +989,12 @@ void beginSimpleFocClosedloop(Stream& serial) {
   g_hall_sensor.init();
   g_hall_sensor.enableInterrupts(doHallA, doHallB, doHallC);
 
-  g_driver.pwm_frequency = 20000;
-  g_driver.voltage_power_supply = config::kBusVoltage;
-  g_driver.voltage_limit = config::kSimpleFocClosedloopVoltageLimit;
-  g_driver.init();
+  g_driver3.pwm_frequency = 20000;
+  g_driver3.voltage_power_supply = config::kBusVoltage;
+  g_driver3.voltage_limit = config::kSimpleFocClosedloopVoltageLimit;
+  g_driver3.init();
 
-  g_motor.linkDriver(&g_driver);
+  g_motor.linkDriver(&g_driver3);
   g_motor.linkSensor(&g_hall_sensor);
   g_motor.controller = MotionControlType::velocity;
   g_motor.torque_controller = TorqueControlType::voltage;
@@ -829,6 +1010,103 @@ void beginSimpleFocClosedloop(Stream& serial) {
   // új rész 
   serial.println("SimpleFOC 3PWM closed-loop hall test");
   serial.println("Driver starts disabled, then DRV8301 is configured over SPI.");
+  serial.print("Enable delay ms=");
+  serial.print(config::kSimpleFocEnableDelayMs);
+  serial.print(" target_rpm=");
+  serial.print(config::kSimpleFocClosedloopTargetRpm, 1);
+  serial.print(" voltage_limit=");
+  serial.print(config::kSimpleFocClosedloopVoltageLimit, 2);
+  serial.print(" velocity_limit_rpm=");
+  serial.print(config::kSimpleFocClosedloopVelocityLimit, 1);
+  serial.print(" startup_rpm=");
+  serial.print(config::kSimpleFocClosedloopStartupRpm, 1);
+  serial.print(" startup_ms=");
+  serial.println(config::kSimpleFocClosedloopStartupMs);
+  serial.print("SPI init=");
+  serial.println(spi_ok ? "ok" : "failed");
+  printState(serial, "boot");
+}
+
+void beginSimpleFocClosedloop6Pwm(Stream& serial) {
+  pinMode(config::kDrvEnablePin, OUTPUT);
+  pinMode(config::kDrvFaultPin, INPUT_PULLUP);
+  pinMode(config::kHallAPin, INPUT_PULLUP);
+  pinMode(config::kHallBPin, INPUT_PULLUP);
+  pinMode(config::kHallCPin, INPUT_PULLUP);
+  pinMode(config::kPwmAPin, OUTPUT);
+  pinMode(config::kPwmBPin, OUTPUT);
+  pinMode(config::kPwmCPin, OUTPUT);
+  pinMode(config::kPwmALowPin, OUTPUT);
+  pinMode(config::kPwmBLowPin, OUTPUT);
+  pinMode(config::kPwmCLowPin, OUTPUT);
+  digitalWrite(config::kDrvEnablePin, LOW);
+
+  g_fault_latched = false;
+  g_driver_enabled = false;
+  g_drv_configured = false;
+  g_closedloop_started = false;
+  g_closedloop_startup_active = false;
+  g_closedloop_loopfoc_called = false;
+  g_closedloop_move_called = false;
+  g_closedloop_initfoc_started = false;
+  g_closedloop_initfoc_done = false;
+  g_closedloop_handoff_allowed = false;
+  g_closedloop_handoff_evaluated = false;
+  g_boot_ms = millis();
+  g_closedloop_enable_ms = 0;
+  g_last_print_ms = 0;
+  g_last_hall_state = readHallState();
+  g_closedloop_startup_target_rad_s = 0.0f;
+  g_closedloop_measured_rad_s_at_handoff = 0.0f;
+  g_closedloop_hall_forward_count = 0;
+  g_closedloop_hall_reverse_count = 0;
+  g_closedloop_hall_jump_count = 0;
+  g_closedloop_hall_invalid_count = 0;
+  g_closedloop_last_hall_idx = hallIndex(g_last_hall_state);
+  g_closedloop_hall_delta = 0;
+  hall_a_irq_count = 0;
+  hall_b_irq_count = 0;
+  hall_c_irq_count = 0;
+  g_last_hall_a_irq_count = 0;
+  g_last_hall_b_irq_count = 0;
+  g_last_hall_c_irq_count = 0;
+  g_hall_a_irq_delta = 0;
+  g_hall_b_irq_delta = 0;
+  g_hall_c_irq_delta = 0;
+  g_last_sensor_angle = 0.0f;
+  g_last_sensor_velocity = 0.0f;
+  g_sensor_angle_changes = false;
+  g_sensor_velocity_valid = false;
+  g_hall_irq_counts_increasing = false;
+  g_drv = {};
+  pwmOff();
+
+  const bool spi_ok = drvSpiInit();
+
+  g_hall_sensor.pullup = Pullup::USE_INTERN;
+  g_hall_sensor.init();
+  g_hall_sensor.enableInterrupts(doHallA, doHallB, doHallC);
+
+  g_driver6.pwm_frequency = 20000;
+  g_driver6.voltage_power_supply = config::kBusVoltage;
+  g_driver6.voltage_limit = config::kSimpleFocClosedloopVoltageLimit;
+  g_driver6.init();
+
+  g_motor.linkDriver(&g_driver6);
+  g_motor.linkSensor(&g_hall_sensor);
+  g_motor.controller = MotionControlType::velocity;
+  g_motor.torque_controller = TorqueControlType::voltage;
+  g_motor.voltage_limit = config::kSimpleFocClosedloopVoltageLimit;
+  g_motor.velocity_limit = rpmToRadPerSec(config::kSimpleFocClosedloopVelocityLimit);
+  g_motor.PID_velocity.P = config::kSimpleFocClosedloopVelP;
+  g_motor.PID_velocity.I = config::kSimpleFocClosedloopVelI;
+  g_motor.PID_velocity.D = config::kSimpleFocClosedloopVelD;
+  g_motor.LPF_velocity.Tf = config::kSimpleFocClosedloopVelLpfTf;
+  g_motor.voltage_sensor_align = 0.5f;
+  g_motor.init();
+
+  serial.println("SimpleFOC 6PWM closed-loop hall test");
+  serial.println("Driver starts disabled, then DRV8301 is configured over SPI for 6PWM.");
   serial.print("Enable delay ms=");
   serial.print(config::kSimpleFocEnableDelayMs);
   serial.print(" target_rpm=");
@@ -1053,7 +1331,7 @@ void updateSimpleFocOpenloop(Stream& serial) {
   if (fault_active) {
     if (g_driver_enabled || !g_fault_latched) {
       g_motor.disable();
-      g_driver.disable();
+      g_driver3.disable();
       pwmOff();
       (void)drvReadAll();
       printState(serial, "fault_before_disable");
@@ -1075,7 +1353,7 @@ void updateSimpleFocOpenloop(Stream& serial) {
 
   if (!g_driver_enabled && (now - g_boot_ms) >= config::kSimpleFocEnableDelayMs) {
     if (drvEnableAndConfigure(serial)) {
-      g_driver.enable();
+      g_driver3.enable();
       g_motor.enable();
       g_openloop_started = true;
       g_openloop_enable_ms = now;
@@ -1098,6 +1376,21 @@ void updateSimpleFocOpenloop(Stream& serial) {
   }
 
   if ((now - g_last_print_ms) >= config::kSimpleFocStatusIntervalMs) {
+    const uint32_t irq_a = hall_a_irq_count;
+    const uint32_t irq_b = hall_b_irq_count;
+    const uint32_t irq_c = hall_c_irq_count;
+    const float sensor_angle = g_hall_sensor.getAngle();
+    const float sensor_velocity = g_hall_sensor.getVelocity();
+    g_hall_irq_counts_increasing =
+        (irq_a > g_last_hall_a_irq_count) || (irq_b > g_last_hall_b_irq_count) ||
+        (irq_c > g_last_hall_c_irq_count);
+    g_sensor_angle_changes = fabsf(sensor_angle - g_last_sensor_angle) > 0.0001f;
+    g_sensor_velocity_valid = isfinite(sensor_velocity) && fabsf(sensor_velocity) < 10000.0f;
+    g_last_hall_a_irq_count = irq_a;
+    g_last_hall_b_irq_count = irq_b;
+    g_last_hall_c_irq_count = irq_c;
+    g_last_sensor_angle = sensor_angle;
+    g_last_sensor_velocity = sensor_velocity;
     g_last_print_ms = now;
     if (g_driver_enabled) {
       (void)drvReadAll();
@@ -1136,7 +1429,7 @@ void updateSimpleFocOpenloopDebug(Stream& serial) {
   if (fault_active) {
     if (g_driver_enabled || !g_fault_latched) {
       g_motor.disable();
-      g_driver.disable();
+      g_driver3.disable();
       pwmOff();
       (void)drvReadAll();
       printState(serial, "fault_before_disable");
@@ -1154,7 +1447,7 @@ void updateSimpleFocOpenloopDebug(Stream& serial) {
 
   if (!g_driver_enabled && (now - g_boot_ms) >= config::kSimpleFocEnableDelayMs) {
     if (drvEnableAndConfigure(serial)) {
-      g_driver.enable();
+      g_driver3.enable();
       g_motor.enable();
       g_openloop_debug_started = true;
       g_openloop_debug_step_ms = now;
@@ -1210,18 +1503,21 @@ void updateSimpleFocClosedloop(Stream& serial) {
   const uint32_t now = millis();
   const bool fault_active = faultActive();
   const uint8_t hall = readHallState();
+  const float target_sign = config::kSimpleFocClosedloopReverse ? -1.0f : 1.0f;
+  const float closed_target_rad_s = closedloopTargetRadS();
   g_closedloop_loopfoc_called = false;
   g_closedloop_move_called = false;
 
   if (fault_active) {
     if (g_driver_enabled || !g_fault_latched) {
       g_motor.disable();
-      g_driver.disable();
+      g_driver3.disable();
       pwmOff();
       (void)drvReadAll();
       printState(serial, "fault_before_disable");
       drvDisable();
       g_closedloop_started = false;
+      g_closedloop_startup_active = false;
       g_closedloop_initfoc_done = false;
       g_fault_latched = true;
     }
@@ -1235,20 +1531,32 @@ void updateSimpleFocClosedloop(Stream& serial) {
 
   if (!g_driver_enabled && (now - g_boot_ms) >= config::kSimpleFocEnableDelayMs) {
     if (drvEnableAndConfigure(serial)) {
-      g_driver.enable();
+      g_driver3.enable();
       g_motor.enable();
       g_closedloop_enable_ms = now;
       g_last_hall_state = hall;
+      g_closedloop_last_hall_idx = hallIndex(hall);
+      g_closedloop_hall_delta = 0;
       g_closedloop_initfoc_started = true;
-      printState(serial, "initFOC_start");
-      g_motor.initFOC();
-      g_closedloop_initfoc_done = true;
-      printState(serial, "initFOC_done");
       if (drvReadyForPwm()) {
-        g_closedloop_started = true;
-        g_closedloop_startup_active = config::kSimpleFocClosedloopUseStartupAssist;
-        g_motor.controller = g_closedloop_startup_active ? MotionControlType::velocity_openloop
-                                                         : MotionControlType::velocity;
+        printState(serial, "initFOC_start");
+        g_motor.initFOC();
+        g_closedloop_initfoc_done = true;
+        printState(serial, "initFOC_done");
+        if (drvReadyForPwm()) {
+          g_closedloop_started = true;
+          g_closedloop_startup_active = config::kSimpleFocClosedloopUseStartupAssist;
+          g_closedloop_handoff_allowed = false;
+          g_closedloop_handoff_evaluated = false;
+          g_closedloop_startup_target_rad_s =
+              rpmToRadPerSec(config::kSimpleFocClosedloopStartupRpm) * target_sign;
+          g_closedloop_measured_rad_s_at_handoff = 0.0f;
+          g_motor.controller = g_closedloop_startup_active ? MotionControlType::velocity_openloop
+                                                           : MotionControlType::velocity;
+        } else {
+          pwmOff();
+          g_closedloop_started = false;
+        }
       } else {
         pwmOff();
         g_closedloop_started = false;
@@ -1257,54 +1565,279 @@ void updateSimpleFocClosedloop(Stream& serial) {
     printState(serial, g_closedloop_started ? "enable_applied" : "enable_failed");
   }
 
-  if (g_closedloop_started && drvReadyForPwm()) {
-    const float target_sign = config::kSimpleFocClosedloopReverse ? -1.0f : 1.0f;
-    if (g_closedloop_startup_active) {
-      const uint32_t elapsed_ms = now - g_closedloop_enable_ms;
-      if (elapsed_ms >= config::kSimpleFocClosedloopStartupMs) {
+  if (!g_closedloop_started) {
+    if ((now - g_last_print_ms) >= config::kSimpleFocStatusIntervalMs) {
+      g_last_print_ms = now;
+      if (g_driver_enabled) {
+        (void)drvReadAll();
+      }
+      printState(serial, "periodic");
+    }
+    return;
+  }
+
+  if (!g_drv_configured || !g_drv.control_match || g_drv.frame_fault || faultActive()) {
+    pwmOff();
+    if (g_driver_enabled) {
+      (void)drvReadAll();
+      printState(serial, "fault_before_disable");
+      drvDisable();
+    }
+    g_closedloop_started = false;
+    g_closedloop_startup_active = false;
+    return;
+  }
+
+  if (hall != g_last_hall_state) {
+    recordClosedloopHallTransition(g_last_hall_state, hall);
+    g_last_hall_state = hall;
+  }
+
+  if (g_closedloop_startup_active) {
+    const uint32_t elapsed_ms = now - g_closedloop_enable_ms;
+    const float measured_rad_s = closedloopMeasuredRadS();
+    const float handoff_limit = fabsf(closed_target_rad_s) * 1.5f;
+    if (elapsed_ms >= config::kSimpleFocClosedloopStartupMs) {
+      const bool prev_handoff_allowed = g_closedloop_handoff_allowed;
+      g_closedloop_measured_rad_s_at_handoff = measured_rad_s;
+      g_closedloop_handoff_allowed = fabsf(measured_rad_s) <= handoff_limit;
+      const bool should_log_handoff =
+          !g_closedloop_handoff_evaluated || prev_handoff_allowed != g_closedloop_handoff_allowed;
+      g_closedloop_handoff_evaluated = true;
+      if (g_closedloop_handoff_allowed) {
         g_closedloop_startup_active = false;
         g_motor.controller = MotionControlType::velocity;
+      }
+      if (should_log_handoff) {
         printState(serial, "startup_handoff");
-      } else {
-        g_motor.move(rpmToRadPerSec(config::kSimpleFocClosedloopStartupRpm) * target_sign);
-        g_closedloop_move_called = true;
       }
     }
 
-    if (!g_closedloop_startup_active) {
-      g_motor.loopFOC();
-      g_closedloop_loopfoc_called = true;
-      g_motor.move(rpmToRadPerSec(config::kSimpleFocClosedloopTargetRpm) * target_sign);
+    if (g_closedloop_startup_active) {
+      float startup_target_rad_s = g_closedloop_startup_target_rad_s;
+      if (fabsf(measured_rad_s) > handoff_limit) {
+        startup_target_rad_s *= 0.5f;
+      }
+      g_motor.move(startup_target_rad_s);
       g_closedloop_move_called = true;
     }
-  } else {
+  }
+
+  if (!g_closedloop_startup_active) {
+    if (!drvReadyForPwm()) {
+      pwmOff();
+      return;
+    }
+    g_motor.loopFOC();
+    g_closedloop_loopfoc_called = true;
+    g_motor.move(closed_target_rad_s);
+    g_closedloop_move_called = true;
+  }
+
+  if (!drvReadyForPwm()) {
     pwmOff();
   }
 
   if ((now - g_last_print_ms) >= config::kSimpleFocStatusIntervalMs) {
+    noInterrupts();
+    const uint32_t irq_a = hall_a_irq_count;
+    const uint32_t irq_b = hall_b_irq_count;
+    const uint32_t irq_c = hall_c_irq_count;
+    interrupts();
+    const float sensor_angle = g_hall_sensor.getAngle();
+    const float sensor_velocity = g_hall_sensor.getVelocity();
+    g_hall_a_irq_delta = irq_a - g_last_hall_a_irq_count;
+    g_hall_b_irq_delta = irq_b - g_last_hall_b_irq_count;
+    g_hall_c_irq_delta = irq_c - g_last_hall_c_irq_count;
+    g_hall_irq_counts_increasing =
+        (g_hall_a_irq_delta > 0u) || (g_hall_b_irq_delta > 0u) || (g_hall_c_irq_delta > 0u);
+    g_sensor_angle_changes = fabsf(sensor_angle - g_last_sensor_angle) > 0.0001f;
+    g_sensor_velocity_valid = isfinite(sensor_velocity) && fabsf(sensor_velocity) > 0.001f;
+    g_last_hall_a_irq_count = irq_a;
+    g_last_hall_b_irq_count = irq_b;
+    g_last_hall_c_irq_count = irq_c;
+    g_last_sensor_angle = sensor_angle;
+    g_last_sensor_velocity = sensor_velocity;
     g_last_print_ms = now;
     if (g_driver_enabled) {
       (void)drvReadAll();
     }
     printState(serial, "periodic");
+    g_closedloop_hall_forward_count = 0;
+    g_closedloop_hall_reverse_count = 0;
+    g_closedloop_hall_jump_count = 0;
+    g_closedloop_hall_invalid_count = 0;
+  }
+}
+
+void updateSimpleFocClosedloop6Pwm(Stream& serial) {
+  const uint32_t now = millis();
+  const bool fault_active = faultActive();
+  const uint8_t hall = readHallState();
+  const float target_sign = config::kSimpleFocClosedloopReverse ? -1.0f : 1.0f;
+  const float closed_target_rad_s = closedloopTargetRadS();
+  g_closedloop_loopfoc_called = false;
+  g_closedloop_move_called = false;
+
+  if (fault_active) {
+    if (g_driver_enabled || !g_fault_latched) {
+      g_motor.disable();
+      g_driver6.disable();
+      pwmOff();
+      (void)drvReadAll();
+      printState(serial, "fault_before_disable");
+      drvDisable();
+      g_closedloop_started = false;
+      g_closedloop_startup_active = false;
+      g_closedloop_initfoc_done = false;
+      g_fault_latched = true;
+    }
+    return;
   }
 
-  if (config::kSimpleFocLogHallChanges && g_driver_enabled && hall != g_last_hall_state) {
-    serial.print("motor_test reason=hall_change prev=");
-    printHallBits(serial, g_last_hall_state);
-    serial.print(" next=");
-    printHallBits(serial, hall);
-    serial.print(" prev_idx=");
-    serial.print(hallIndex(g_last_hall_state));
-    serial.print(" next_idx=");
-    serial.print(hallIndex(hall));
-    serial.print(" valid=");
-    serial.print(isValidHallState(hall) ? "yes" : "no");
-    serial.print(" target_rpm=");
-    serial.print(config::kSimpleFocClosedloopTargetRpm, 1);
-    printDrvRegisters(serial);
-    serial.println();
+  if (g_fault_latched) {
+    g_fault_latched = false;
+    printState(serial, "fault_cleared");
+  }
+
+  if (!g_driver_enabled && (now - g_boot_ms) >= config::kSimpleFocEnableDelayMs) {
+    if (drvEnableAndConfigure(serial)) {
+      g_driver6.enable();
+      g_motor.enable();
+      g_closedloop_enable_ms = now;
+      g_last_hall_state = hall;
+      g_closedloop_last_hall_idx = hallIndex(hall);
+      g_closedloop_hall_delta = 0;
+      g_closedloop_initfoc_started = true;
+      if (drvReadyForPwm()) {
+        printState(serial, "initFOC_start");
+        g_motor.initFOC();
+        g_closedloop_initfoc_done = true;
+        printState(serial, "initFOC_done");
+        if (drvReadyForPwm()) {
+          g_closedloop_started = true;
+          g_closedloop_startup_active = config::kSimpleFocClosedloopUseStartupAssist;
+          g_closedloop_handoff_allowed = false;
+          g_closedloop_handoff_evaluated = false;
+          g_closedloop_startup_target_rad_s =
+              rpmToRadPerSec(config::kSimpleFocClosedloopStartupRpm) * target_sign;
+          g_closedloop_measured_rad_s_at_handoff = 0.0f;
+          g_motor.controller = g_closedloop_startup_active ? MotionControlType::velocity_openloop
+                                                           : MotionControlType::velocity;
+        } else {
+          pwmOff();
+          g_closedloop_started = false;
+        }
+      } else {
+        pwmOff();
+        g_closedloop_started = false;
+      }
+    }
+    printState(serial, g_closedloop_started ? "enable_applied" : "enable_failed");
+  }
+
+  if (!g_closedloop_started) {
+    if ((now - g_last_print_ms) >= config::kSimpleFocStatusIntervalMs) {
+      g_last_print_ms = now;
+      if (g_driver_enabled) {
+        (void)drvReadAll();
+      }
+      printState(serial, "periodic");
+    }
+    return;
+  }
+
+  if (!g_drv_configured || !g_drv.control_match || g_drv.frame_fault || faultActive()) {
+    pwmOff();
+    if (g_driver_enabled) {
+      (void)drvReadAll();
+      printState(serial, "fault_before_disable");
+      drvDisable();
+    }
+    g_closedloop_started = false;
+    g_closedloop_startup_active = false;
+    return;
+  }
+
+  if (hall != g_last_hall_state) {
+    recordClosedloopHallTransition(g_last_hall_state, hall);
     g_last_hall_state = hall;
+  }
+
+  if (g_closedloop_startup_active) {
+    const uint32_t elapsed_ms = now - g_closedloop_enable_ms;
+    const float measured_rad_s = closedloopMeasuredRadS();
+    const float handoff_limit = fabsf(closed_target_rad_s) * 1.5f;
+    if (elapsed_ms >= config::kSimpleFocClosedloopStartupMs) {
+      const bool prev_handoff_allowed = g_closedloop_handoff_allowed;
+      g_closedloop_measured_rad_s_at_handoff = measured_rad_s;
+      g_closedloop_handoff_allowed = fabsf(measured_rad_s) <= handoff_limit;
+      const bool should_log_handoff =
+          !g_closedloop_handoff_evaluated || prev_handoff_allowed != g_closedloop_handoff_allowed;
+      g_closedloop_handoff_evaluated = true;
+      if (g_closedloop_handoff_allowed) {
+        g_closedloop_startup_active = false;
+        g_motor.controller = MotionControlType::velocity;
+      }
+      if (should_log_handoff) {
+        printState(serial, "startup_handoff");
+      }
+    }
+
+    if (g_closedloop_startup_active) {
+      float startup_target_rad_s = g_closedloop_startup_target_rad_s;
+      if (fabsf(measured_rad_s) > handoff_limit) {
+        startup_target_rad_s *= 0.5f;
+      }
+      g_motor.move(startup_target_rad_s);
+      g_closedloop_move_called = true;
+    }
+  }
+
+  if (!g_closedloop_startup_active) {
+    if (!drvReadyForPwm()) {
+      pwmOff();
+      return;
+    }
+    g_motor.loopFOC();
+    g_closedloop_loopfoc_called = true;
+    g_motor.move(closed_target_rad_s);
+    g_closedloop_move_called = true;
+  }
+
+  if (!drvReadyForPwm()) {
+    pwmOff();
+  }
+
+  if ((now - g_last_print_ms) >= config::kSimpleFocStatusIntervalMs) {
+    noInterrupts();
+    const uint32_t irq_a = hall_a_irq_count;
+    const uint32_t irq_b = hall_b_irq_count;
+    const uint32_t irq_c = hall_c_irq_count;
+    interrupts();
+    const float sensor_angle = g_hall_sensor.getAngle();
+    const float sensor_velocity = g_hall_sensor.getVelocity();
+    g_hall_a_irq_delta = irq_a - g_last_hall_a_irq_count;
+    g_hall_b_irq_delta = irq_b - g_last_hall_b_irq_count;
+    g_hall_c_irq_delta = irq_c - g_last_hall_c_irq_count;
+    g_hall_irq_counts_increasing =
+        (g_hall_a_irq_delta > 0u) || (g_hall_b_irq_delta > 0u) || (g_hall_c_irq_delta > 0u);
+    g_sensor_angle_changes = fabsf(sensor_angle - g_last_sensor_angle) > 0.0001f;
+    g_sensor_velocity_valid = isfinite(sensor_velocity) && fabsf(sensor_velocity) > 0.001f;
+    g_last_hall_a_irq_count = irq_a;
+    g_last_hall_b_irq_count = irq_b;
+    g_last_hall_c_irq_count = irq_c;
+    g_last_sensor_angle = sensor_angle;
+    g_last_sensor_velocity = sensor_velocity;
+    g_last_print_ms = now;
+    if (g_driver_enabled) {
+      (void)drvReadAll();
+    }
+    printState(serial, "periodic");
+    g_closedloop_hall_forward_count = 0;
+    g_closedloop_hall_reverse_count = 0;
+    g_closedloop_hall_jump_count = 0;
+    g_closedloop_hall_invalid_count = 0;
   }
 }
 
@@ -1339,6 +1872,11 @@ void begin(Stream& serial) {
 
   if (config::kTestMode == config::TEST_SIMPLEFOC_CLOSEDLOOP) {
     beginSimpleFocClosedloop(serial);
+    return;
+  }
+
+  if (config::kTestMode == config::TEST_SIMPLEFOC_CLOSEDLOOP_6PWM) {
+    beginSimpleFocClosedloop6Pwm(serial);
     return;
   }
 
@@ -1420,6 +1958,11 @@ void update(Stream& serial) {
 
   if (config::kTestMode == config::TEST_SIMPLEFOC_CLOSEDLOOP) {
     updateSimpleFocClosedloop(serial);
+    return;
+  }
+
+  if (config::kTestMode == config::TEST_SIMPLEFOC_CLOSEDLOOP_6PWM) {
+    updateSimpleFocClosedloop6Pwm(serial);
     return;
   }
 

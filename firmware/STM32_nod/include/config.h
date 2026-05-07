@@ -14,10 +14,11 @@ enum TestMode : uint8_t {
   TEST_6STEP,
   TEST_SIMPLEFOC_OPENLOOP,
   TEST_SIMPLEFOC_OPENLOOP_DEBUG,
-  TEST_SIMPLEFOC_CLOSEDLOOP
+  TEST_SIMPLEFOC_CLOSEDLOOP,
+  TEST_SIMPLEFOC_CLOSEDLOOP_6PWM
 };
 
-constexpr TestMode kTestMode = TEST_SIMPLEFOC_CLOSEDLOOP;
+constexpr TestMode kTestMode = TEST_SIMPLEFOC_CLOSEDLOOP_6PWM;
 
 constexpr uint32_t kSerialBaud = 115200;
 constexpr uint32_t kStatusPrintIntervalMs = 250;
@@ -41,16 +42,16 @@ constexpr uint32_t kSimpleFocEnableDelayMs = 1500;
 constexpr uint32_t kSimpleFocStatusIntervalMs = 250;
 constexpr bool kSimpleFocLogHallChanges = true;
 constexpr float kSimpleFocClosedloopTargetRpm = 120.0f;
-constexpr float kSimpleFocClosedloopVoltageLimit = 1.4f;
-constexpr float kSimpleFocClosedloopVelocityLimit = 400.0f;
+constexpr float kSimpleFocClosedloopVoltageLimit = 1.0f;
+constexpr float kSimpleFocClosedloopVelocityLimit = 250.0f;
 constexpr bool kSimpleFocClosedloopReverse = false;
-constexpr float kSimpleFocClosedloopVelP = 0.008f;
-constexpr float kSimpleFocClosedloopVelI = 0.02f;
+constexpr float kSimpleFocClosedloopVelP = 0.003f;
+constexpr float kSimpleFocClosedloopVelI = 0.01f;
 constexpr float kSimpleFocClosedloopVelD = 0.0f;
-constexpr float kSimpleFocClosedloopVelLpfTf = 0.25f;
+constexpr float kSimpleFocClosedloopVelLpfTf = 0.3f;
 constexpr bool kSimpleFocClosedloopUseStartupAssist = true;
-constexpr uint32_t kSimpleFocClosedloopStartupMs = 1500;
-constexpr float kSimpleFocClosedloopStartupRpm = 50.0f;
+constexpr uint32_t kSimpleFocClosedloopStartupMs = 2000;
+constexpr float kSimpleFocClosedloopStartupRpm = 30.0f;
 
 constexpr uint32_t kDebugTxPin = PA2;
 constexpr uint32_t kDebugRxPin = PA3;
@@ -65,6 +66,9 @@ constexpr uint32_t kDrvFaultPin = PB0;
 constexpr uint32_t kPwmAPin = PA8;
 constexpr uint32_t kPwmBPin = PA9;
 constexpr uint32_t kPwmCPin = PA10;
+constexpr uint32_t kPwmALowPin = PB13;
+constexpr uint32_t kPwmBLowPin = PB14;
+constexpr uint32_t kPwmCLowPin = PB15;
 
 constexpr uint32_t kDrvCsPin = PA4;
 constexpr uint32_t kDrvSckPin = PA5;

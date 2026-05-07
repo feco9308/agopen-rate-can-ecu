@@ -32,6 +32,8 @@ const char* selectedModeName() {
       return "TEST_SIMPLEFOC_OPENLOOP_DEBUG";
     case config::TEST_SIMPLEFOC_CLOSEDLOOP:
       return "TEST_SIMPLEFOC_CLOSEDLOOP";
+    case config::TEST_SIMPLEFOC_CLOSEDLOOP_6PWM:
+      return "TEST_SIMPLEFOC_CLOSEDLOOP_6PWM";
     default:
       return "UNKNOWN";
   }
@@ -71,6 +73,7 @@ void setup() {
     case config::TEST_SIMPLEFOC_OPENLOOP:
     case config::TEST_SIMPLEFOC_OPENLOOP_DEBUG:
     case config::TEST_SIMPLEFOC_CLOSEDLOOP:
+    case config::TEST_SIMPLEFOC_CLOSEDLOOP_6PWM:
       motor_test::begin(DebugSerial);
       break;
   }
@@ -92,6 +95,7 @@ void loop() {
     case config::TEST_SIMPLEFOC_OPENLOOP:
     case config::TEST_SIMPLEFOC_OPENLOOP_DEBUG:
     case config::TEST_SIMPLEFOC_CLOSEDLOOP:
+    case config::TEST_SIMPLEFOC_CLOSEDLOOP_6PWM:
       motor_test::update(DebugSerial);
       break;
   }
