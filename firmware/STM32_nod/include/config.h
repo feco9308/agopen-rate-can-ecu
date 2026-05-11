@@ -11,6 +11,10 @@ enum TestMode : uint8_t {
   TEST_DRIVER_SPI_STABILITY,
   TEST_HALL_SENSOR_CHECK,
   TEST_PHASE_CHECK,
+  TEST_PHASE_CHECK_3PWM,
+  TEST_PHASE_CHECK_6PWM,
+  TEST_RAW_C_PINS,
+  TEST_RAW_3PWM_PINS,
   TEST_6STEP,
   TEST_SIMPLEFOC_OPENLOOP,
   TEST_SIMPLEFOC_OPENLOOP_DEBUG,
@@ -18,7 +22,7 @@ enum TestMode : uint8_t {
   TEST_SIMPLEFOC_CLOSEDLOOP_6PWM
 };
 
-constexpr TestMode kTestMode = TEST_SIMPLEFOC_CLOSEDLOOP_6PWM;
+constexpr TestMode kTestMode = TEST_SIMPLEFOC_OPENLOOP;
 
 constexpr uint32_t kSerialBaud = 115200;
 constexpr uint32_t kStatusPrintIntervalMs = 250;
@@ -49,9 +53,20 @@ constexpr float kSimpleFocClosedloopVelP = 0.003f;
 constexpr float kSimpleFocClosedloopVelI = 0.01f;
 constexpr float kSimpleFocClosedloopVelD = 0.0f;
 constexpr float kSimpleFocClosedloopVelLpfTf = 0.3f;
+constexpr float kSimpleFocClosedloopVelOutputRamp = 20.0f;
+constexpr uint32_t kSimpleFocClosedloopMotionDownsample = 4;
+constexpr int8_t kSimpleFocClosedloopHallSectorOffset = 0;
+constexpr float kSimpleFocClosedloopStallDetectRatio = 0.6f;
+constexpr float kSimpleFocClosedloopRawZeroEpsilon = 0.001f;
+constexpr uint32_t kSimpleFocClosedloopStallDebounceMs = 180;
+constexpr uint32_t kSimpleFocClosedloopRecoveryMs = 450;
+constexpr float kSimpleFocClosedloopRecoveryRpm = 24.0f;
+constexpr uint8_t kSimpleFocClosedloopHandoffMinForwardTransitions = 3;
+constexpr float kSimpleFocClosedloopHandoffMinRawSensorRadS = 5.0f;
+constexpr float kSimpleFocClosedloop6PwmDeadZone = 0.005f;
 constexpr bool kSimpleFocClosedloopUseStartupAssist = true;
-constexpr uint32_t kSimpleFocClosedloopStartupMs = 2000;
-constexpr float kSimpleFocClosedloopStartupRpm = 30.0f;
+constexpr uint32_t kSimpleFocClosedloopStartupMs = 800;
+constexpr float kSimpleFocClosedloopStartupRpm = 300.0f;
 
 constexpr uint32_t kDebugTxPin = PA2;
 constexpr uint32_t kDebugRxPin = PA3;
@@ -68,7 +83,7 @@ constexpr uint32_t kPwmBPin = PA9;
 constexpr uint32_t kPwmCPin = PA10;
 constexpr uint32_t kPwmALowPin = PB13;
 constexpr uint32_t kPwmBLowPin = PB14;
-constexpr uint32_t kPwmCLowPin = PB15;
+constexpr uint32_t kPwmCLowPin = PB1;
 
 constexpr uint32_t kDrvCsPin = PA4;
 constexpr uint32_t kDrvSckPin = PA5;
@@ -79,18 +94,19 @@ constexpr float kBusVoltage = 12.0f;
 constexpr float kPwmLimit = 0.10f;
 constexpr float kVoltageLimit = 0.50f;
 constexpr float kSimpleFocOpenloopTargetRpm = 60.0f;
-constexpr float kSimpleFocOpenloopVoltageLimit = 1.20f;
+constexpr float kSimpleFocOpenloopVoltageLimit = 1.90f;
 constexpr float kSimpleFocOpenloopStartupRpm = 20.0f;
-constexpr float kSimpleFocOpenloopStartupVoltageLimit = 1.20f;
+constexpr float kSimpleFocOpenloopStartupVoltageLimit = 1.80f;
 constexpr uint32_t kSimpleFocOpenloopStartupHoldMs = 1500;
 constexpr uint32_t kSimpleFocOpenloopRampMs = 4000;
+constexpr uint32_t kSimpleFocOpenloopDrvReadbackDebounceMs = 600;
 constexpr float kSimpleFocOpenloopDebugVoltage = 1.35f;
 constexpr float kSimpleFocOpenloopDebugStepDeg = 10.0f;
 constexpr uint32_t kSimpleFocOpenloopDebugStepMs = 50;
 constexpr bool kDrvUse3PwmMode = true;
 constexpr uint8_t kDrvGateCurrentCode = 0;   // 0=1.7A, 1=0.7A, 2=0.25A
-constexpr uint8_t kDrvOcpModeCode = 0;       // 0=current limit, 1=latch shutdown, 2=report only, 3=disabled
-constexpr uint8_t kDrvOcpAdjustCode = 8;     // 5-bit OC_ADJ_SET field
+constexpr uint8_t kDrvOcpModeCode = 3;       // 0=current limit, 1=latch shutdown, 2=report only, 3=disabled
+constexpr uint8_t kDrvOcpAdjustCode = 27;    // 5-bit OC_ADJ_SET field
 constexpr uint8_t kDrvOctwModeCode = 0;      // 0=report OT+OC on nOCTW
 constexpr uint8_t kDrvShuntGainCode = 0;     // 0=10V/V, 1=20V/V, 2=40V/V, 3=80V/V
 constexpr bool kDrvDcCalCh1 = false;

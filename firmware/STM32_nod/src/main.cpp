@@ -24,6 +24,14 @@ const char* selectedModeName() {
       return "TEST_HALL_SENSOR_CHECK";
     case config::TEST_PHASE_CHECK:
       return "TEST_PHASE_CHECK";
+    case config::TEST_PHASE_CHECK_3PWM:
+      return "TEST_PHASE_CHECK_3PWM";
+    case config::TEST_PHASE_CHECK_6PWM:
+      return "TEST_PHASE_CHECK_6PWM";
+    case config::TEST_RAW_C_PINS:
+      return "TEST_RAW_C_PINS";
+    case config::TEST_RAW_3PWM_PINS:
+      return "TEST_RAW_3PWM_PINS";
     case config::TEST_6STEP:
       return "TEST_6STEP";
     case config::TEST_SIMPLEFOC_OPENLOOP:
@@ -69,6 +77,10 @@ void setup() {
     case config::TEST_DRIVER_SPI_STABILITY:
     case config::TEST_HALL_SENSOR_CHECK:
     case config::TEST_PHASE_CHECK:
+    case config::TEST_PHASE_CHECK_3PWM:
+    case config::TEST_PHASE_CHECK_6PWM:
+    case config::TEST_RAW_C_PINS:
+    case config::TEST_RAW_3PWM_PINS:
     case config::TEST_6STEP:
     case config::TEST_SIMPLEFOC_OPENLOOP:
     case config::TEST_SIMPLEFOC_OPENLOOP_DEBUG:
@@ -91,6 +103,10 @@ void loop() {
     case config::TEST_DRIVER_SPI_STABILITY:
     case config::TEST_HALL_SENSOR_CHECK:
     case config::TEST_PHASE_CHECK:
+    case config::TEST_PHASE_CHECK_3PWM:
+    case config::TEST_PHASE_CHECK_6PWM:
+    case config::TEST_RAW_C_PINS:
+    case config::TEST_RAW_3PWM_PINS:
     case config::TEST_6STEP:
     case config::TEST_SIMPLEFOC_OPENLOOP:
     case config::TEST_SIMPLEFOC_OPENLOOP_DEBUG:
