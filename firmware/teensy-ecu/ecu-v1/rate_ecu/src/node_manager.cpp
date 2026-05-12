@@ -46,6 +46,19 @@ void NodeManager::onDiagFrame(uint8_t nodeId, const NodeDiagFrame& frame) {
     n.warning_flags = frame.warning_flags;
 }
 
+void NodeManager::onPresenceFrame(uint8_t nodeId, const NodePresenceFrame& frame) {
+    if (nodeId == 0 || nodeId > cfg::NODE_COUNT_MAX) return;
+
+    auto& n = nodes_[nodeId];
+    n.seed_flags = frame.seed_flags;
+    n.blockage_pct = frame.blockage_pct;
+    n.slowdown_pct = frame.slowdown_pct;
+    n.skip_pct = frame.skip_pct;
+    n.double_pct = frame.double_pct;
+    n.singulation_pct = frame.singulation_pct;
+    n.population_x1k = frame.population_x1k_u16;
+}
+
 const NodeRuntimeState& NodeManager::node(uint8_t nodeId) const {
     return nodes_[nodeId];
 }

@@ -60,7 +60,7 @@ Payload:
 |---|---|---|---|---|
 | 0 | `system_mode` | `uint8` | - | `OFF`, `MANUAL`, `AUTO`, `CALIBRATION`, `FAULT_HOLD` |
 | 1 | `control_flags` | `uint8` | bitfield | Runtime control flags |
-| 2-3 | `base_rpm_x10` | `int16` | rpm | Common target motor RPM for this channel |
+| 2-3 | `base_rpm_u16` | `uint16` | rpm | Common target motor RPM for this channel, `1 rpm/bit` |
 | 4-5 | `sync_pos_u16` | `uint16` | rev | Sync reference position |
 | 6 | `sequence` | `uint8` | - | Rolling sequence counter |
 | 7 | `reserved` | `uint8` | - | Reserved |
@@ -137,7 +137,7 @@ Important:
 ### NODE_PRESENCE
 
 Purpose:
-- Optional low-rate presence / heartbeat message from node
+- Low-rate node presence plus seed / blockage auxiliary feedback from node
 
 Message IDs:
 - `S0`: `0x141..0x150`
@@ -146,7 +146,22 @@ Message IDs:
 - `S3`: `0x441..0x450`
 
 Payload:
-- Raw 8-byte payload
+
+| Byte | Signal | Type | Unit | Description |
+|---|---|---|---|---|
+| 0 | `seed_flags` | `uint8` | bitfield | Seed / blockage data validity and state |
+| 1 | `blockage_pct` | `uint8` | % | Estimated blockage level |
+| 2 | `slowdown_pct` | `uint8` | % | Applied artificial slowdown / flow reduction |
+| 3 | `skip_pct` | `uint8` | % | Skip percentage, if available |
+| 4 | `double_pct` | `uint8` | % | Double percentage, if available |
+| 5 | `singulation_pct` | `uint8` | % | Singulation percentage, if available |
+| 6-7 | `population_x1k_u16` | `uint16` | k seeds/area | Optional measured population in thousands |
+
+`seed_flags` bits:
+- `bit0` `SEED_FLAG_VALID`
+- `bit1` `SEED_FLAG_BLOCKED`
+- `bit2` `SEED_FLAG_SLOWED`
+- `bit3` `SEED_FLAG_SENSOR_FAULT`
 
 ### NODE_CFG_ACK
 
@@ -179,7 +194,7 @@ Payload:
 |---|---|---|---|---|
 | 0 | `status_flags` | `uint8` | bitfield | Node runtime state |
 | 1 | `error_code` | `uint8` | - | Main error code |
-| 2-3 | `actual_rpm_x10` | `int16` | rpm | Actual motor RPM |
+| 2-3 | `actual_rpm_u16` | `uint16` | rpm | Actual motor RPM, `1 rpm/bit` |
 | 4-5 | `actual_pos_u16` | `uint16` | rev | Actual node position |
 | 6 | `alive_counter` | `uint8` | - | Rolling heartbeat counter |
 | 7 | `sync_error_x256rev` | `int8` | rev | Signed sync error |
@@ -241,4 +256,5 @@ Use cases:
 - The ECU currently runs at `250 kbit/s`, not `500 kbit/s`
 - Full 16-bit section masks are supported
 - Four sensor banks are compiled in
+- `NODE_PRESENCE` is now the normal runtime auxiliary feedback channel for seed / blockage data
 - Detailed node diag is available on CAN and can also be forwarded by the ECU over UDP

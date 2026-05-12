@@ -24,6 +24,7 @@ struct PersistentConfig {
     uint8_t diag_detail_level;
     uint8_t ip_last_octet;
     uint8_t module_id;
+    uint8_t rate_app_mode;
     uint8_t monitor_output_enable;
     uint8_t monitor_output_mode;
     uint8_t monitor_rows;
@@ -81,6 +82,9 @@ void setIpLastOctet(uint8_t octet);
 
 uint8_t moduleId();
 void setModuleId(uint8_t module_id);
+
+uint8_t rateAppMode();
+void setRateAppMode(uint8_t mode);
 
 bool monitorOutputEnabled();
 void setMonitorOutputEnabled(bool enabled);

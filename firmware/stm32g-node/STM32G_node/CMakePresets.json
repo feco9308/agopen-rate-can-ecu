@@ -1,0 +1,21 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "Debug",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/Debug",
+      "toolchainFile": "${sourceDir}/../cmake/gcc-arm-none-eabi.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_MAKE_PROGRAM": "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "Debug",
+      "configurePreset": "Debug"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "stm32g431-debug",
+      "displayName": "STM32G431 Debug",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/Debug",
+      "toolchainFile": "${sourceDir}/cmake/gcc-arm-none-eabi.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_MAKE_PROGRAM": "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "stm32g431-debug",
+      "configurePreset": "stm32g431-debug"
+    }
+  ]
+}

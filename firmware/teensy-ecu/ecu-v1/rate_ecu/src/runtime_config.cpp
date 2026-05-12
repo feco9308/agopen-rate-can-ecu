@@ -7,7 +7,7 @@
 
 namespace {
 
-constexpr uint16_t CONFIG_VERSION = 0x0104;
+constexpr uint16_t CONFIG_VERSION = 0x0105;
 constexpr int EEPROM_ADDR = 0;
 
 runtime_cfg::PersistentConfig g_config{};
@@ -68,6 +68,10 @@ void clampConfig(runtime_cfg::PersistentConfig& config) {
         config.ip_last_octet = 200;
     }
 
+    if (config.rate_app_mode > static_cast<uint8_t>(RateAppMode::SK21)) {
+        config.rate_app_mode = static_cast<uint8_t>(RateAppMode::LEGACY);
+    }
+
     if (config.monitor_output_mode > static_cast<uint8_t>(MonitorOutputMode::BLOCKAGE)) {
         config.monitor_output_mode = static_cast<uint8_t>(MonitorOutputMode::OFF);
     }
@@ -125,6 +129,7 @@ void setDefaults(runtime_cfg::PersistentConfig& config) {
     config.diag_detail_level = 0;
     config.ip_last_octet = 200;
     config.module_id = 0;
+    config.rate_app_mode = static_cast<uint8_t>(RateAppMode::LEGACY);
     config.monitor_output_enable = 0;
     config.monitor_output_mode = static_cast<uint8_t>(MonitorOutputMode::OFF);
     config.monitor_rows = cfg::DEFAULT_CONFIGURED_ROW_COUNT;
@@ -261,6 +266,12 @@ void setIpLastOctet(uint8_t octet) {
 
 uint8_t moduleId() { return g_config.module_id; }
 void setModuleId(uint8_t module_id) { g_config.module_id = module_id; }
+
+uint8_t rateAppMode() { return g_config.rate_app_mode; }
+void setRateAppMode(uint8_t mode) {
+    g_config.rate_app_mode = mode;
+    clampConfig(g_config);
+}
 
 bool monitorOutputEnabled() { return g_config.monitor_output_enable != 0; }
 void setMonitorOutputEnabled(bool enabled) { g_config.monitor_output_enable = enabled ? 1 : 0; }

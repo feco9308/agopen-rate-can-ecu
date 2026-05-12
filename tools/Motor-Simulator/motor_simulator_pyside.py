@@ -98,6 +98,11 @@ WRN_COMM_LATE = 1 << 4
 
 FLT_DRIVER = 1 << 7
 
+SEED_VALID = 1 << 0
+SEED_BLOCKED = 1 << 1
+SEED_SLOWED = 1 << 2
+SEED_SENSOR_FAULT = 1 << 3
+
 
 @dataclass(frozen=True)
 class CanProfile:
@@ -216,6 +221,8 @@ class SimNode:
     motor_temp: float = 30.0
     last_cmd_seq: int = 0
     last_cmd_rx: float = 0.0
+    slowdown_pct: int = 0
+    blockage_pct: int = 0
 
     def profile(self) -> CanProfile:
         return PROFILES[self.can_profile_index]
@@ -270,6 +277,20 @@ class MotorSimulatorEngine:
                     node.fault_flags = 0
                     node.error_code = 0
         self.log(f"Sensor {sensor} {'enabled' if enabled else 'disabled'}")
+
+    def set_node_impairment(self, sensor: int, node_id: int, slowdown_pct: int, blockage_pct: int) -> None:
+        with self.lock:
+            for node in self.nodes:
+                if node.sensor_channel == sensor and node.node_id == node_id:
+                    node.slowdown_pct = max(0, min(100, slowdown_pct))
+                    node.blockage_pct = max(0, min(100, blockage_pct))
+                    break
+            else:
+                return
+        self.log(f"Impairment S{sensor} N{node_id}: slowdown={slowdown_pct}% blockage={blockage_pct}%")
+
+    def clear_node_impairment(self, sensor: int, node_id: int) -> None:
+        self.set_node_impairment(sensor, node_id, 0, 0)
 
     def _node_should_publish(self, node: SimNode, now: float) -> bool:
         if not self.sensor_enabled.get(node.sensor_channel, True):
@@ -649,6 +670,10 @@ class MotorSimulatorEngine:
             cmd_rpm = -cmd_rpm
         cmd_rpm = clamp(cmd_rpm, -10000.0, 10000.0)
 
+        slowdown_scale = (100.0 - float(node.slowdown_pct)) / 100.0
+        blockage_scale = (100.0 - float(node.blockage_pct)) / 100.0
+        cmd_rpm *= slowdown_scale * blockage_scale
+
         should_run = (
             has_seen_cmd
             and node.enabled
@@ -687,6 +712,8 @@ class MotorSimulatorEngine:
                 node.warning_flags |= WRN_SYNC_DEV
             if can_timeout:
                 node.warning_flags |= WRN_COMM_LATE
+            if node.slowdown_pct > 0 or node.blockage_pct > 0:
+                node.warning_flags |= WRN_RPM_DEV
             if estop_flag:
                 node.fault_flags = FLT_DRIVER
                 node.error_code = 2
@@ -701,7 +728,28 @@ class MotorSimulatorEngine:
         node.motor_temp = clamp(30.0 + abs(node.actual_rpm) * 0.04, 20.0, 95.0)
 
     def _send_presence(self, node: SimNode) -> None:
-        self.send_msg(node.presence_id(), [node.node_id, 1, node.sensor_channel, node.can_profile_index, 0, 0x03, 0, 0])
+        seed_flags = 0
+        if node.section_active or node.enabled or node.should_run:
+            seed_flags |= SEED_VALID
+        if node.blockage_pct >= 80:
+            seed_flags |= SEED_BLOCKED
+        if node.slowdown_pct > 0:
+            seed_flags |= SEED_SLOWED
+
+        skip_pct = int(clamp(float(node.blockage_pct), 0.0, 100.0))
+        double_pct = 0
+        singulation_pct = int(clamp(100.0 - skip_pct - double_pct, 0.0, 100.0))
+        population_x1k = 0
+        data = [
+            seed_flags & 0xFF,
+            node.blockage_pct & 0xFF,
+            node.slowdown_pct & 0xFF,
+            skip_pct & 0xFF,
+            double_pct & 0xFF,
+            singulation_pct & 0xFF,
+            *le_u16(population_x1k),
+        ]
+        self.send_msg(node.presence_id(), data)
 
     def _send_status(self, node: SimNode) -> None:
         g = self.globals[node.can_profile_index]
@@ -928,6 +976,12 @@ class MotorSimulatorWindow(QMainWindow):
         self.test_duration_spin = QSpinBox()
         self.test_duration_spin.setRange(1, 30)
         self.test_duration_spin.setValue(3)
+        self.slowdown_spin = QSpinBox()
+        self.slowdown_spin.setRange(0, 100)
+        self.slowdown_spin.setSuffix("%")
+        self.blockage_spin = QSpinBox()
+        self.blockage_spin.setRange(0, 100)
+        self.blockage_spin.setSuffix("%")
 
         btn_discover = QPushButton("Discover")
         btn_discover.clicked.connect(self.send_discover)
@@ -945,6 +999,10 @@ class MotorSimulatorWindow(QMainWindow):
         btn_test.clicked.connect(self.send_test_spin)
         btn_can_src = QPushButton("Set CAN Source")
         btn_can_src.clicked.connect(self.send_set_can_source)
+        btn_apply_impairment = QPushButton("Apply Impairment")
+        btn_apply_impairment.clicked.connect(self.apply_impairment)
+        btn_clear_impairment = QPushButton("Clear Impairment")
+        btn_clear_impairment.clicked.connect(self.clear_impairment)
 
         form.addWidget(QLabel("UID32 Hex"), 0, 0)
         form.addWidget(self.uid_edit, 0, 1)
@@ -958,6 +1016,10 @@ class MotorSimulatorWindow(QMainWindow):
         form.addWidget(self.test_rpm_spin, 1, 1)
         form.addWidget(QLabel("Duration"), 1, 2)
         form.addWidget(self.test_duration_spin, 1, 3)
+        form.addWidget(QLabel("Slowdown"), 1, 4)
+        form.addWidget(self.slowdown_spin, 1, 5)
+        form.addWidget(QLabel("Blockage"), 1, 6)
+        form.addWidget(self.blockage_spin, 1, 7)
         form.addWidget(btn_discover, 2, 0)
         form.addWidget(btn_assign, 2, 1)
         form.addWidget(btn_save, 2, 2)
@@ -966,6 +1028,8 @@ class MotorSimulatorWindow(QMainWindow):
         form.addWidget(btn_identify, 2, 5)
         form.addWidget(btn_test, 2, 6)
         form.addWidget(btn_can_src, 2, 7)
+        form.addWidget(btn_apply_impairment, 3, 4, 1, 2)
+        form.addWidget(btn_clear_impairment, 3, 6, 1, 2)
 
         layout.addWidget(service_box)
         return layout
@@ -993,7 +1057,7 @@ class MotorSimulatorWindow(QMainWindow):
         summary_form.addRow("Last RX age", labels["last_rx"])
         layout.addWidget(summary_box)
 
-        table = QTableWidget(0, 16)
+        table = QTableWidget(0, 18)
         table.setHorizontalHeaderLabels([
             "Node",
             "UID32",
@@ -1008,6 +1072,8 @@ class MotorSimulatorWindow(QMainWindow):
             "Current A",
             "Ctrl C",
             "Motor C",
+            "Slow %",
+            "Block %",
             "Warnings",
             "Faults",
             "Identify",
@@ -1074,6 +1140,22 @@ class MotorSimulatorWindow(QMainWindow):
         uid32 = self._uid_value()
         self.engine.send_msg(SERVICE_ID_SET_CAN_SOURCE, [uid32 & 0xFF, (uid32 >> 8) & 0xFF, (uid32 >> 16) & 0xFF, (uid32 >> 24) & 0xFF, self.assign_sensor_spin.value(), self.assign_node_spin.value(), self.profile_spin.value(), 1])
 
+    def apply_impairment(self) -> None:
+        self.engine.set_node_impairment(
+            self.assign_sensor_spin.value(),
+            self.assign_node_spin.value(),
+            self.slowdown_spin.value(),
+            self.blockage_spin.value(),
+        )
+
+    def clear_impairment(self) -> None:
+        self.slowdown_spin.setValue(0)
+        self.blockage_spin.setValue(0)
+        self.engine.clear_node_impairment(
+            self.assign_sensor_spin.value(),
+            self.assign_node_spin.value(),
+        )
+
     def refresh_ui(self) -> None:
         snap = self.engine.snapshot()
         now = time.time()
@@ -1113,6 +1195,8 @@ class MotorSimulatorWindow(QMainWindow):
                 f"{node.motor_current:.1f}",
                 f"{node.controller_temp:.0f}",
                 f"{node.motor_temp:.0f}",
+                f"{node.slowdown_pct}",
+                f"{node.blockage_pct}",
                 f"0x{node.warning_flags:02X}",
                 f"0x{node.fault_flags:02X}",
                 "Blink" if now < node.identify_until else "",

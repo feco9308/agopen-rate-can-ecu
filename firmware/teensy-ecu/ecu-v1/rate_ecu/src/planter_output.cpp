@@ -50,6 +50,17 @@ uint32_t estimatePopulation(uint32_t target_population, float target_rpm, float 
     return static_cast<uint32_t>(estimated + 0.5f);
 }
 
+uint32_t populationFromNode(const NodeRuntimeState& node_state,
+                            uint32_t target_population,
+                            float target_rpm,
+                            float actual_rpm) {
+    if ((node_state.seed_flags & SEED_FLAG_VALID) != 0 && node_state.population_x1k > 0) {
+        return static_cast<uint32_t>(node_state.population_x1k) * 1000u;
+    }
+
+    return estimatePopulation(target_population, target_rpm, actual_rpm);
+}
+
 uint8_t estimateRowStatus(bool section_enabled, const NodeRuntimeState& node_state, float target_rpm) {
     if (!section_enabled) {
         return STATUS_NORMAL;
@@ -59,9 +70,17 @@ uint8_t estimateRowStatus(bool section_enabled, const NodeRuntimeState& node_sta
         return STATUS_RED;
     }
 
+    if ((node_state.seed_flags & SEED_FLAG_BLOCKED) != 0 || node_state.blockage_pct >= 80u) {
+        return STATUS_RED;
+    }
+
     const float rpm_error = fabsf(node_state.actual_rpm - target_rpm);
     const float rpm_threshold = (target_rpm > 0.0f) ? max(50.0f, target_rpm * 0.10f) : 50.0f;
-    if (node_state.warning_flags != 0 || rpm_error > rpm_threshold) {
+    if (node_state.warning_flags != 0 ||
+        rpm_error > rpm_threshold ||
+        node_state.skip_pct > 0 ||
+        node_state.double_pct > 0 ||
+        node_state.slowdown_pct > 0) {
         return STATUS_YELLOW;
     }
 
