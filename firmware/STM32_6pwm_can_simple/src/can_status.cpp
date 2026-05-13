@@ -43,6 +43,25 @@ void putI16(uint8_t* data, uint8_t offset, int16_t value) {
   data[offset + 1] = static_cast<uint8_t>((static_cast<uint16_t>(value) >> 8) & 0xFF);
 }
 
+bool sendFrame(uint32_t id, const uint8_t* data) {
+  if (HAL_FDCAN_GetTxFifoFreeLevel(&g_hfdcan1) == 0u) {
+    return false;
+  }
+
+  FDCAN_TxHeaderTypeDef header = {};
+  header.Identifier = id;
+  header.IdType = FDCAN_STANDARD_ID;
+  header.TxFrameType = FDCAN_DATA_FRAME;
+  header.DataLength = FDCAN_DLC_BYTES_8;
+  header.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
+  header.BitRateSwitch = FDCAN_BRS_OFF;
+  header.FDFormat = FDCAN_CLASSIC_CAN;
+  header.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
+  header.MessageMarker = 0;
+  return HAL_FDCAN_AddMessageToTxFifoQ(&g_hfdcan1, const_cast<FDCAN_TxHeaderTypeDef*>(&header),
+                                       const_cast<uint8_t*>(data)) == HAL_OK;
+}
+
 }  // namespace
 
 bool begin() {
@@ -92,20 +111,6 @@ void tick(const AppStatus& status, uint32_t now) {
   if (!g_ready || (now - g_last_tx_ms) < config::kCanStatusIntervalMs) {
     return;
   }
-  if (HAL_FDCAN_GetTxFifoFreeLevel(&g_hfdcan1) == 0u) {
-    return;
-  }
-
-  FDCAN_TxHeaderTypeDef header = {};
-  header.Identifier = config::kCanStatusId;
-  header.IdType = FDCAN_STANDARD_ID;
-  header.TxFrameType = FDCAN_DATA_FRAME;
-  header.DataLength = FDCAN_DLC_BYTES_8;
-  header.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
-  header.BitRateSwitch = FDCAN_BRS_OFF;
-  header.FDFormat = FDCAN_CLASSIC_CAN;
-  header.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
-  header.MessageMarker = 0;
 
   uint8_t data[8] = {};
   data[0] = static_cast<uint8_t>((status.driver_enabled ? 0x01u : 0u) |
@@ -118,9 +123,16 @@ void tick(const AppStatus& status, uint32_t now) {
   putI16(data, 4, scaledI16(status.measured_rad_s, 100.0f));
   putI16(data, 6, scaledI16(config::kBusVoltage, 100.0f));
 
-  if (HAL_FDCAN_AddMessageToTxFifoQ(&g_hfdcan1, &header, data) == HAL_OK) {
+  if (sendFrame(config::kCanStatusId, data)) {
     g_last_tx_ms = now;
   }
+
+  uint8_t current_data[8] = {};
+  putI16(current_data, 0, scaledI16(status.current_a, 100.0f));
+  putI16(current_data, 2, scaledI16(status.current_b, 100.0f));
+  putI16(current_data, 4, scaledI16(status.current_c, 100.0f));
+  putI16(current_data, 6, scaledI16(status.current_ref_v, 1000.0f));
+  (void)sendFrame(config::kCanCurrentId, current_data);
 }
 
 bool ready() {

@@ -13,4 +13,8 @@ struct AppStatus {
   float target_rad_s = 0.0f;
   float measured_rad_s = 0.0f;
   float voltage_limit = 0.0f;
+  float current_a = 0.0f;
+  float current_b = 0.0f;
+  float current_c = 0.0f;
+  float current_ref_v = 0.0f;
 };
